@@ -47,15 +47,6 @@ router.get('/:token', async (req, res) => {
       });
     }
     
-    // Check access limit expiration
-    if (drop.max_access_count && drop.view_count >= drop.max_access_count) {
-      return res.status(410).json({
-        error: `This drop has reached its access limit of ${drop.max_access_count} times and is no longer available`,
-        code: 'DROP_ACCESS_LIMIT_REACHED',
-        maxAccessCount: drop.max_access_count,
-        currentAccessCount: drop.view_count
-      });
-    }
 
     // Handle password protection
     if (drop.password_hash && !password) {
