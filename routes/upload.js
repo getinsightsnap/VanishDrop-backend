@@ -3,7 +3,7 @@ const multer = require('multer');
 const QRCode = require('qrcode');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const { pool } = require('../config/database');
+const { supabase } = require('../config/database');
 const { validateTierLimits } = require('../utils/tierLimits');
 const { rateLimitMiddleware, checkFreeTierLimits, incrementFreeTierUsage } = require('../middleware/rateLimiter');
 const { 
@@ -48,7 +48,7 @@ router.use(checkFreeTierLimits);
 // Upload file endpoint
 router.post('/', upload.single('file'), async (req, res) => {
   try {
-    const { expiration, password, otp, message, generateQR } = req.body;
+    const { expiration, password, otp, message, generateQR, accessCount } = req.body;
     const file = req.file;
     
     // Validate required fields
@@ -64,7 +64,8 @@ router.post('/', upload.single('file'), async (req, res) => {
       expiration,
       password,
       otp: otp === 'true',
-      generateQR: generateQR === 'true'
+      generateQR: generateQR === 'true',
+      accessCount
     });
 
     if (validationErrors.length > 0) {
@@ -134,6 +135,9 @@ router.post('/', upload.single('file'), async (req, res) => {
       }
     }
 
+    // Set access count based on tier limits
+    const maxAccessCount = parseInt(accessCount) || req.tierLimits.minAccessCount || 1;
+    
     // Prepare drop data
     const dropData = {
       token,
@@ -147,9 +151,10 @@ router.post('/', upload.single('file'), async (req, res) => {
       mimetype: file ? file.mimetype : 'text/plain',
       file_size: file ? file.size : (message ? message.length : 0),
       expires_at: expiresAt,
-      view_once: true,
+      view_once: maxAccessCount === 1, // Set to true only if access count is 1
       view_count: 0,
       download_count: 0,
+      max_access_count: maxAccessCount,
       ip_address: req.ip,
       protection_type: 'none'
     };
@@ -187,28 +192,38 @@ router.post('/', upload.single('file'), async (req, res) => {
       }
     }
 
-    // Insert into database
-    const insertQuery = `
-      INSERT INTO drops (
-        token, user_id, tier, type, filename, original_filename, file_path,
-        message_content, mimetype, file_size, password_hash, otp_code, otp_expires_at,
-        expires_at, view_once, view_count, download_count, ip_address, protection_type, qr_code
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-      RETURNING id, token, expires_at, protection_type
-    `;
+    // Insert into Supabase database
+    const { data: createdDrop, error: insertError } = await supabase
+      .from('drops')
+      .insert([{
+        token: dropData.token,
+        user_id: dropData.user_id,
+        tier: dropData.tier,
+        type: dropData.type,
+        filename: dropData.filename,
+        original_filename: dropData.original_filename,
+        file_path: dropData.file_path,
+        message_content: dropData.message_content,
+        mimetype: dropData.mimetype,
+        file_size: dropData.file_size,
+        password_hash: dropData.password_hash,
+        otp_code: dropData.otp_code,
+        otp_expires_at: dropData.otp_expires_at,
+        expires_at: dropData.expires_at,
+        view_once: dropData.view_once,
+        view_count: dropData.view_count,
+        download_count: dropData.download_count,
+        max_access_count: dropData.max_access_count,
+        ip_address: dropData.ip_address,
+        protection_type: dropData.protection_type,
+        qr_code: dropData.qr_code
+      }])
+      .select('id, token, expires_at, protection_type')
+      .single();
 
-    const insertValues = [
-      dropData.token, dropData.user_id, dropData.tier, dropData.type,
-      dropData.filename, dropData.original_filename, dropData.file_path,
-      dropData.message_content, dropData.mimetype, dropData.file_size,
-      dropData.password_hash, dropData.otp_code, dropData.otp_expires_at,
-      dropData.expires_at, dropData.view_once, dropData.view_count,
-      dropData.download_count, dropData.ip_address, dropData.protection_type,
-      dropData.qr_code
-    ];
-
-    const result = await pool.query(insertQuery, insertValues);
-    const createdDrop = result.rows[0];
+    if (insertError) {
+      throw new Error(`Database insert failed: ${insertError.message}`);
+    }
 
     // Update free tier usage counter
     if (req.userTier === 'free') {
@@ -217,15 +232,21 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     // Update user stats for authenticated users
     if (req.userId) {
-      await pool.query(`
-        INSERT INTO user_stats (user_id, total_uploads, storage_used)
-        VALUES ($1, 1, $2)
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-          total_uploads = user_stats.total_uploads + 1,
-          storage_used = user_stats.storage_used + $2,
-          updated_at = NOW()
-      `, [req.userId, dropData.file_size]);
+      const { error: statsError } = await supabase
+        .from('user_stats')
+        .upsert({
+          user_id: req.userId,
+          total_uploads: 1,
+          storage_used: dropData.file_size,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id',
+          ignoreDuplicates: false
+        });
+
+      if (statsError) {
+        console.warn('Failed to update user stats:', statsError);
+      }
     }
 
     // Prepare response
