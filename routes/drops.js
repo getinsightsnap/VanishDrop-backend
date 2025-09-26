@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const QRCode = require('qrcode');
 const { createClient } = require('@supabase/supabase-js');
-const { pool } = require('../config/database');
+const { supabase } = require('../config/database');
 const { verifyPassword } = require('../utils/fileUtils');
 
 // Initialize Supabase client
@@ -20,25 +20,29 @@ router.get('/:token', async (req, res) => {
     const { password, otp } = req.query;
 
     // Find the drop
-    const dropResult = await pool.query(
-      'SELECT * FROM drops WHERE token = $1 AND expires_at > NOW()',
-      [token]
-    );
+    const { data: drops, error: dropError } = await supabase
+      .from('drops')
+      .select('*')
+      .eq('token', token)
+      .gt('expires_at', new Date().toISOString())
+      .limit(1);
 
-    if (dropResult.rows.length === 0) {
+    if (dropError || !drops || drops.length === 0) {
       return res.status(404).json({
         error: 'Drop not found or expired',
         code: 'DROP_NOT_FOUND'
       });
     }
 
-    const drop = dropResult.rows[0];
+    const drop = drops[0];
 
-    // Check if already accessed (view_once)
-    if (drop.view_once && drop.view_count >= 1) {
+    // Check if access limit has been reached
+    if (drop.view_count >= drop.max_access_count) {
       return res.status(410).json({
-        error: 'This drop has already been accessed and is no longer available',
-        code: 'DROP_ALREADY_ACCESSED'
+        error: `This drop has reached its access limit of ${drop.max_access_count} times and is no longer available`,
+        code: 'DROP_ACCESS_LIMIT_REACHED',
+        maxAccessCount: drop.max_access_count,
+        currentAccessCount: drop.view_count
       });
     }
 
@@ -83,24 +87,44 @@ router.get('/:token', async (req, res) => {
     }
 
     // Update access count and last accessed
-    await pool.query(
-      'UPDATE drops SET view_count = view_count + 1, download_count = download_count + 1, last_accessed = NOW() WHERE id = $1',
-      [drop.id]
-    );
+    const { error: updateError } = await supabase
+      .from('drops')
+      .update({
+        view_count: drop.view_count + 1,
+        download_count: drop.download_count + 1,
+        last_accessed: new Date().toISOString()
+      })
+      .eq('id', drop.id);
+
+    if (updateError) {
+      console.error('Failed to update drop access count:', updateError);
+    }
 
     // Log the download
-    await pool.query(
-      'INSERT INTO download_logs (drop_id, ip_address) VALUES ($1, $2)',
-      [drop.id, req.ip]
-    );
+    const { error: logError } = await supabase
+      .from('download_logs')
+      .insert({
+        drop_id: drop.id,
+        ip_address: req.ip
+      });
+
+    if (logError) {
+      console.error('Failed to log download:', logError);
+    }
 
     // Update user stats if applicable
     if (drop.user_id) {
-      await pool.query(`
-        UPDATE user_stats 
-        SET total_downloads = total_downloads + 1, updated_at = NOW()
-        WHERE user_id = $1
-      `, [drop.user_id]);
+      const { error: statsError } = await supabase
+        .from('user_stats')
+        .update({
+          total_downloads: drop.download_count + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', drop.user_id);
+
+      if (statsError) {
+        console.warn('Failed to update user stats:', statsError);
+      }
     }
 
     // Prepare response based on type
