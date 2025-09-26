@@ -48,7 +48,7 @@ router.use(checkFreeTierLimits);
 // Upload file endpoint
 router.post('/', upload.single('file'), async (req, res) => {
   try {
-    const { expiration, password, otp, message, generateQR } = req.body;
+    const { expiration, password, otp, message, generateQR, accessCount } = req.body;
     const file = req.file;
     
     // Validate required fields
@@ -64,7 +64,8 @@ router.post('/', upload.single('file'), async (req, res) => {
       expiration,
       password,
       otp: otp === 'true',
-      generateQR: generateQR === 'true'
+      generateQR: generateQR === 'true',
+      accessCount
     });
 
     if (validationErrors.length > 0) {
@@ -96,8 +97,25 @@ router.post('/', upload.single('file'), async (req, res) => {
     }
 
     // Calculate expiration
-    const expirationMinutes = parseInt(expiration) || 10;
-    const expiresAt = new Date(Date.now() + (expirationMinutes * 60 * 1000));
+    // Handle expiration logic based on what's provided
+    let expiresAt = null;
+    let maxAccessCount = null;
+    
+    // If expiration time is provided, set time-based expiration
+    if (expiration) {
+      const expirationMinutes = parseInt(expiration) || 10;
+      expiresAt = new Date(Date.now() + (expirationMinutes * 60 * 1000));
+    }
+    
+    // If access count is provided, set access-based expiration
+    if (accessCount) {
+      maxAccessCount = parseInt(accessCount) || req.tierLimits?.minAccessCount || 1;
+    }
+    
+    // If neither is provided, default to time-based (10 minutes)
+    if (!expiration && !accessCount) {
+      expiresAt = new Date(Date.now() + (10 * 60 * 1000));
+    }
 
     // Generate access token
     const token = generateToken(32);
@@ -149,9 +167,10 @@ router.post('/', upload.single('file'), async (req, res) => {
       mimetype: file ? file.mimetype : 'text/plain',
       file_size: file ? file.size : (message ? message.length : 0),
       expires_at: expiresAt,
-      view_once: false,
+      view_once: maxAccessCount === 1, // Set to true only if access count is 1
       view_count: 0,
       download_count: 0,
+      max_access_count: maxAccessCount,
       ip_address: req.ip,
       protection_type: 'none'
     };
@@ -210,6 +229,7 @@ router.post('/', upload.single('file'), async (req, res) => {
         view_once: dropData.view_once,
         view_count: dropData.view_count,
         download_count: dropData.download_count,
+        max_access_count: dropData.max_access_count,
         ip_address: dropData.ip_address,
         protection_type: dropData.protection_type,
         qr_code: dropData.qr_code
