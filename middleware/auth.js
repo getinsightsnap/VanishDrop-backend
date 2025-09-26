@@ -35,28 +35,8 @@ const detectUserTier = async (req, res, next) => {
       return next();
     }
     
-    // Get user tier from Supabase user metadata or database
-    let userTier = 'free'; // Default to free tier for all users
-    
-    // Try to get tier from user metadata first
-    if (user.user_metadata?.tier) {
-      userTier = user.user_metadata.tier;
-    } else {
-      // Fallback: check users table in our database
-      try {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('plan_type')
-          .eq('id', user.id)
-          .single();
-        
-        if (userData?.plan_type === 'paid') {
-          userTier = 'pro'; // Only set to pro if explicitly paid
-        }
-      } catch (dbError) {
-        console.warn('Could not fetch user tier from database:', dbError);
-      }
-    }
+    // Get user tier from Supabase user metadata
+    const userTier = user.user_metadata?.tier || 'free';
     
     req.user = user;
     req.userId = user.id;
@@ -98,25 +78,8 @@ const requireAuth = async (req, res, next) => {
       });
     }
     
-    // Get user tier
-    let userTier = 'free';
-    if (user.user_metadata?.tier) {
-      userTier = user.user_metadata.tier;
-    } else {
-      try {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('plan_type')
-          .eq('id', user.id)
-          .single();
-        
-        if (userData?.plan_type === 'paid') {
-          userTier = 'pro';
-        }
-      } catch (dbError) {
-        console.warn('Could not fetch user tier from database:', dbError);
-      }
-    }
+    // Get user tier from Supabase user metadata
+    const userTier = user.user_metadata?.tier || 'free';
     
     req.user = user;
     req.userId = user.id;
