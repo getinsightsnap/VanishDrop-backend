@@ -5,6 +5,8 @@ const getTierLimits = (tier) => {
       lifetimeUploads: 5, // 5 uploads total per IP
       minExpiration: 1 * 60 * 1000, // 1 minute
       maxExpiration: 10 * 60 * 1000, // 10 minutes
+      maxAccessCount: 25, // 1-25 times link can be opened
+      minAccessCount: 1,
       features: ['basic_sharing', 'qr_generation'],
       allowPassword: false,
       allowQR: true,
@@ -19,6 +21,8 @@ const getTierLimits = (tier) => {
       lifetimeUploads: -1, // unlimited
       minExpiration: 1 * 60 * 1000, // 1 minute
       maxExpiration: 60 * 60 * 1000, // 60 minutes
+      maxAccessCount: 100, // 1-100 times link can be opened
+      minAccessCount: 1,
       features: ['basic_sharing', 'password_protection', 'otp_protection', 'qr_generation', 'dashboard', 'email_notifications'],
       allowPassword: true,
       allowQR: true,
@@ -33,6 +37,8 @@ const getTierLimits = (tier) => {
       lifetimeUploads: -1, // unlimited
       minExpiration: 1 * 60 * 1000, // 1 minute
       maxExpiration: 60 * 60 * 1000, // 60 minutes
+      maxAccessCount: 100, // 1-100 times link can be opened
+      minAccessCount: 1,
       features: ['all_features', 'password_protection', 'otp_protection', 'qr_generation', 'request_portals', 'webhooks', 'api_access', 'analytics'],
       allowPassword: true,
       allowQR: true,
@@ -105,6 +111,17 @@ const validateTierLimits = (req, options = {}) => {
     });
   }
 
+  // Check access count limits
+  if (options.accessCount) {
+    const accessCount = parseInt(options.accessCount);
+    if (accessCount < limits.minAccessCount || accessCount > limits.maxAccessCount) {
+      errors.push({
+        field: 'accessCount',
+        message: `Access count must be between ${limits.minAccessCount} and ${limits.maxAccessCount} for ${req.userTier} tier`,
+        code: 'INVALID_ACCESS_COUNT'
+      });
+    }
+  }
 
   return errors;
 };
