@@ -86,32 +86,7 @@ app.use('/api/drop', dropsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/cleanup', cleanupRouter);
 
-// Add a simple tiers endpoint for testing
-app.get('/api/tiers', (req, res) => {
-  console.log('📊 Tiers endpoint accessed');
-  res.json({
-    tiers: {
-      free: {
-        name: 'Free',
-        price: 0,
-        maxFileSize: 50 * 1024 * 1024,
-        features: ['basic_sharing', 'qr_generation']
-      },
-      pro: {
-        name: 'Pro',
-        price: 8.99,
-        maxFileSize: 2 * 1024 * 1024 * 1024,
-        features: ['password_protection', 'otp_protection']
-      },
-      business: {
-        name: 'Business',
-        price: 29.99,
-        maxFileSize: 10 * 1024 * 1024 * 1024,
-        features: ['all_features']
-      }
-    }
-  });
-});
+// Tiers endpoint is handled by public.js router
 
 // 404 handler
 app.use('*', (req, res) => {
