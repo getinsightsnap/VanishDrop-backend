@@ -97,8 +97,25 @@ router.post('/', upload.single('file'), async (req, res) => {
     }
 
     // Calculate expiration
-    const expirationMinutes = parseInt(expiration) || 10;
-    const expiresAt = new Date(Date.now() + (expirationMinutes * 60 * 1000));
+    // Handle expiration logic based on what's provided
+    let expiresAt = null;
+    let maxAccessCount = null;
+    
+    // If expiration time is provided, set time-based expiration
+    if (expiration) {
+      const expirationMinutes = parseInt(expiration) || 10;
+      expiresAt = new Date(Date.now() + (expirationMinutes * 60 * 1000));
+    }
+    
+    // If access count is provided, set access-based expiration
+    if (accessCount) {
+      maxAccessCount = parseInt(accessCount) || req.tierLimits.minAccessCount || 1;
+    }
+    
+    // If neither is provided, default to time-based (10 minutes)
+    if (!expiration && !accessCount) {
+      expiresAt = new Date(Date.now() + (10 * 60 * 1000));
+    }
 
     // Generate access token
     const token = generateToken(32);
@@ -135,8 +152,7 @@ router.post('/', upload.single('file'), async (req, res) => {
       }
     }
 
-    // Set access count based on tier limits
-    const maxAccessCount = parseInt(accessCount) || req.tierLimits.minAccessCount || 1;
+    // maxAccessCount is already set above
     
     // Prepare drop data
     const dropData = {
