@@ -1,43 +1,45 @@
-const { RateLimiterRedis, RateLimiterMemory } = require('rate-limiter-flexible');
-const { getRedisClient } = require('../config/redis');
-const { pool } = require('../config/database');
+const { supabase } = require('../config/database');
 
-let rateLimiter;
-
-// Initialize rate limiter
-try {
-  const redis = getRedisClient();
-  rateLimiter = new RateLimiterRedis({
-    storeClient: redis,
-    keyPrefix: 'rl_',
-    points: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // Number of requests
-    duration: parseInt(process.env.RATE_LIMIT_WINDOW_MS) / 1000 || 900, // Per 15 minutes by default
-  });
-} catch (error) {
-  // Fallback to memory-based rate limiter if Redis is not available
-  console.warn('Redis not available for rate limiting, using memory store');
-  rateLimiter = new RateLimiterMemory({
-    points: 100,
-    duration: 900,
-  });
-}
+// Simple in-memory rate limiter for basic protection
+const requestCounts = new Map();
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+const MAX_REQUESTS = 100;
 
 // General rate limiter middleware
 const rateLimitMiddleware = (req, res, next) => {
   const key = req.ip;
+  const now = Date.now();
   
-  rateLimiter.consume(key)
-    .then(() => {
-      next();
-    })
-    .catch(() => {
-      res.status(429).json({
-        error: 'Too many requests',
-        code: 'RATE_LIMIT_EXCEEDED',
-        retryAfter: Math.round(rateLimiter.msBeforeNext / 1000),
-        message: 'Please slow down and try again later'
-      });
+  // Clean old entries
+  for (const [ip, data] of requestCounts.entries()) {
+    if (now - data.firstRequest > RATE_LIMIT_WINDOW) {
+      requestCounts.delete(ip);
+    }
+  }
+  
+  // Check current IP
+  const ipData = requestCounts.get(key);
+  if (!ipData) {
+    requestCounts.set(key, { count: 1, firstRequest: now });
+    return next();
+  }
+  
+  if (now - ipData.firstRequest > RATE_LIMIT_WINDOW) {
+    // Reset window
+    requestCounts.set(key, { count: 1, firstRequest: now });
+    return next();
+  }
+  
+  if (ipData.count >= MAX_REQUESTS) {
+    return res.status(429).json({
+      error: 'Too many requests',
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: 'Please slow down and try again later'
     });
+  }
+  
+  ipData.count++;
+  next();
 };
 
 // Check free tier upload limits (5 uploads per IP)
@@ -51,21 +53,33 @@ const checkFreeTierLimits = async (req, res, next) => {
     const maxUploads = parseInt(process.env.FREE_TIER_LIFETIME_UPLOADS) || 5;
 
     // Check current usage
-    const result = await pool.query(
-      'SELECT total_uploads, is_blocked FROM ip_usage WHERE ip_address = $1',
-      [ip]
-    );
+    const { data: usageData, error: usageError } = await supabase
+      .from('ip_usage')
+      .select('total_uploads, is_blocked')
+      .eq('ip_address', ip)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (usageError && usageError.code !== 'PGRST116') { // PGRST116 = no rows found
+      console.error('Error checking IP usage:', usageError);
+      return next(); // Continue on error to avoid blocking legitimate users
+    }
+
+    if (!usageData) {
       // First upload from this IP
-      await pool.query(
-        'INSERT INTO ip_usage (ip_address, total_uploads) VALUES ($1, 0)',
-        [ip]
-      );
+      const { error: insertError } = await supabase
+        .from('ip_usage')
+        .insert({
+          ip_address: ip,
+          total_uploads: 0
+        });
+
+      if (insertError) {
+        console.error('Error creating IP usage record:', insertError);
+      }
       return next();
     }
 
-    const usage = result.rows[0];
+    const usage = usageData;
 
     if (usage.is_blocked) {
       return res.status(403).json({
@@ -97,14 +111,20 @@ const checkFreeTierLimits = async (req, res, next) => {
 // Increment free tier usage counter
 const incrementFreeTierUsage = async (ip) => {
   try {
-    await pool.query(`
-      INSERT INTO ip_usage (ip_address, total_uploads, last_upload) 
-      VALUES ($1, 1, NOW())
-      ON CONFLICT (ip_address) 
-      DO UPDATE SET 
-        total_uploads = ip_usage.total_uploads + 1,
-        last_upload = NOW()
-    `, [ip]);
+    const { error } = await supabase
+      .from('ip_usage')
+      .upsert({
+        ip_address: ip,
+        total_uploads: 1,
+        last_upload: new Date().toISOString()
+      }, {
+        onConflict: 'ip_address',
+        ignoreDuplicates: false
+      });
+
+    if (error) {
+      console.error('Error incrementing free tier usage:', error);
+    }
   } catch (error) {
     console.error('Error incrementing free tier usage:', error);
   }
