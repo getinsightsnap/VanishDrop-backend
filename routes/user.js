@@ -1,5 +1,5 @@
 const express = require('express');
-const { pool } = require('../config/database');
+const { supabase } = require('../config/database');
 const { deleteFile } = require('../utils/fileUtils');
 const { requireTier } = require('../middleware/auth');
 
@@ -11,44 +11,38 @@ router.get('/drops', async (req, res) => {
     const { page = 1, limit = 20, status = 'active' } = req.query;
     const offset = (page - 1) * limit;
 
-    let whereClause = 'WHERE user_id = $1';
-    let queryParams = [req.userId];
+    let query = supabase
+      .from('drops')
+      .select('id, token, type, original_filename, file_size, mimetype, expires_at, view_count, download_count, protection_type, created_at, last_accessed, max_access_count')
+      .eq('user_id', req.userId);
 
     if (status === 'active') {
-      whereClause += ' AND expires_at > NOW() AND view_count = 0';
+      query = query.gt('expires_at', new Date().toISOString()).eq('view_count', 0);
     } else if (status === 'expired') {
-      whereClause += ' AND (expires_at <= NOW() OR view_count >= 1)';
+      query = query.or(`expires_at.lte.${new Date().toISOString()},view_count.gte.max_access_count`);
     }
 
-    const dropsResult = await pool.query(`
-      SELECT 
-        id, token, type, original_filename, file_size, mimetype,
-        expires_at, view_count, download_count, protection_type,
-        created_at, last_accessed
-      FROM drops 
-      ${whereClause}
-      ORDER BY created_at DESC 
-      LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
-    `, [...queryParams, limit, offset]);
+    const { data: drops, error, count } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
 
-    // Get total count
-    const countResult = await pool.query(`
-      SELECT COUNT(*) as total FROM drops ${whereClause}
-    `, queryParams);
+    if (error) {
+      throw new Error(`Failed to fetch drops: ${error.message}`);
+    }
 
-    const drops = dropsResult.rows.map(drop => ({
+    const formattedDrops = drops.map(drop => ({
       ...drop,
       shareUrl: `${process.env.FRONTEND_URL}/f/${drop.token}`,
-      isExpired: new Date() > new Date(drop.expires_at) || drop.view_count >= 1
+      isExpired: new Date() > new Date(drop.expires_at) || drop.view_count >= drop.max_access_count
     }));
 
     res.json({
-      drops,
+      drops: formattedDrops,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: parseInt(countResult.rows[0].total),
-        totalPages: Math.ceil(countResult.rows[0].total / limit)
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit)
       }
     });
 
@@ -65,10 +59,11 @@ router.get('/drops', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     // Get user stats
-    const statsResult = await pool.query(
-      'SELECT * FROM user_stats WHERE user_id = $1',
-      [req.userId]
-    );
+    const { data: userStats, error: statsError } = await supabase
+      .from('user_stats')
+      .select('*')
+      .eq('user_id', req.userId)
+      .single();
 
     let stats = {
       totalUploads: 0,
@@ -78,8 +73,7 @@ router.get('/stats', async (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    if (statsResult.rows.length > 0) {
-      const userStats = statsResult.rows[0];
+    if (userStats && !statsError) {
       stats = {
         totalUploads: userStats.total_uploads,
         totalDownloads: userStats.total_downloads,
@@ -91,25 +85,43 @@ router.get('/stats', async (req, res) => {
 
     // Get additional analytics (Pro/Business only)
     if (req.tierLimits.allowAnalytics) {
-      const analyticsResult = await pool.query(`
-        SELECT 
-          COUNT(*) as active_drops,
-          COUNT(CASE WHEN expires_at <= NOW() OR view_count >= 1 THEN 1 END) as expired_drops,
-          AVG(download_count) as avg_downloads_per_drop,
-          MAX(created_at) as last_upload
-        FROM drops 
-        WHERE user_id = $1
-      `, [req.userId]);
+      const now = new Date().toISOString();
+      
+      // Get active drops count
+      const { count: activeDrops } = await supabase
+        .from('drops')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', req.userId)
+        .gt('expires_at', now)
+        .eq('view_count', 0);
 
-      if (analyticsResult.rows.length > 0) {
-        const analytics = analyticsResult.rows[0];
-        stats.analytics = {
-          activeDrops: parseInt(analytics.active_drops),
-          expiredDrops: parseInt(analytics.expired_drops),
-          avgDownloadsPerDrop: parseFloat(analytics.avg_downloads_per_drop) || 0,
-          lastUpload: analytics.last_upload
-        };
-      }
+      // Get expired drops count
+      const { count: expiredDrops } = await supabase
+        .from('drops')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', req.userId)
+        .or(`expires_at.lte.${now},view_count.gte.max_access_count`);
+
+      // Get average downloads and last upload
+      const { data: analyticsData } = await supabase
+        .from('drops')
+        .select('download_count, created_at')
+        .eq('user_id', req.userId);
+
+      const avgDownloads = analyticsData?.length > 0 
+        ? analyticsData.reduce((sum, drop) => sum + (drop.download_count || 0), 0) / analyticsData.length 
+        : 0;
+
+      const lastUpload = analyticsData?.length > 0 
+        ? analyticsData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0].created_at
+        : null;
+
+      stats.analytics = {
+        activeDrops: activeDrops || 0,
+        expiredDrops: expiredDrops || 0,
+        avgDownloadsPerDrop: avgDownloads,
+        lastUpload
+      };
     }
 
     res.json({
@@ -133,37 +145,54 @@ router.delete('/drop/:id', async (req, res) => {
     const { id } = req.params;
 
     // Find the drop
-    const dropResult = await pool.query(
-      'SELECT * FROM drops WHERE id = $1 AND user_id = $2',
-      [id, req.userId]
-    );
+    const { data: drop, error: dropError } = await supabase
+      .from('drops')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', req.userId)
+      .single();
 
-    if (dropResult.rows.length === 0) {
+    if (dropError || !drop) {
       return res.status(404).json({
         error: 'Drop not found or not owned by user',
         code: 'DROP_NOT_FOUND'
       });
     }
 
-    const drop = dropResult.rows[0];
-
-    // Delete file if exists
+    // Delete file from Supabase Storage if exists
     if (drop.file_path && drop.type === 'file') {
-      await deleteFile(drop.file_path);
+      try {
+        await supabase.storage
+          .from('vanish-drop-files')
+          .remove([drop.file_path]);
+      } catch (storageError) {
+        console.warn('Failed to delete file from storage:', storageError);
+      }
     }
 
     // Delete from database
-    await pool.query('DELETE FROM drops WHERE id = $1', [id]);
+    const { error: deleteError } = await supabase
+      .from('drops')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) {
+      throw new Error(`Failed to delete drop: ${deleteError.message}`);
+    }
 
     // Update user stats
-    await pool.query(`
-      UPDATE user_stats 
-      SET 
-        total_uploads = GREATEST(total_uploads - 1, 0),
-        storage_used = GREATEST(storage_used - $1, 0),
-        updated_at = NOW()
-      WHERE user_id = $2
-    `, [drop.file_size, req.userId]);
+    const { error: statsError } = await supabase
+      .from('user_stats')
+      .update({
+        total_uploads: Math.max(0, (await supabase.from('user_stats').select('total_uploads').eq('user_id', req.userId).single()).data?.total_uploads - 1 || 0),
+        storage_used: Math.max(0, (await supabase.from('user_stats').select('storage_used').eq('user_id', req.userId).single()).data?.storage_used - (drop.file_size || 0) || 0),
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', req.userId);
+
+    if (statsError) {
+      console.warn('Failed to update user stats:', statsError);
+    }
 
     res.json({
       success: true,
@@ -195,15 +224,24 @@ router.post('/request', requireTier('business'), async (req, res) => {
     const token = generateToken(16);
     const expiresAt = new Date(Date.now() + (expirationHours * 60 * 60 * 1000));
 
-    const result = await pool.query(`
-      INSERT INTO request_portals (
-        token, user_id, title, max_files, max_file_size, expires_at, 
-        notification_email, webhook_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, token, expires_at
-    `, [token, req.userId, title, maxFiles, maxFileSize, expiresAt, notificationEmail, webhookUrl]);
+    const { data: portal, error } = await supabase
+      .from('request_portals')
+      .insert({
+        token,
+        user_id: req.userId,
+        title,
+        max_files: maxFiles,
+        max_file_size: maxFileSize,
+        expires_at: expiresAt.toISOString(),
+        notification_email: notificationEmail,
+        webhook_url: webhookUrl
+      })
+      .select('id, token, expires_at')
+      .single();
 
-    const portal = result.rows[0];
+    if (error) {
+      throw new Error(`Failed to create request portal: ${error.message}`);
+    }
 
     res.status(201).json({
       success: true,
@@ -232,22 +270,23 @@ router.post('/request', requireTier('business'), async (req, res) => {
 // Get user's request portals (Business tier only)
 router.get('/requests', requireTier('business'), async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT 
-        id, token, title, max_files, max_file_size, expires_at,
-        files_received, notification_email, webhook_url, created_at
-      FROM request_portals 
-      WHERE user_id = $1 
-      ORDER BY created_at DESC
-    `, [req.userId]);
+    const { data: portals, error } = await supabase
+      .from('request_portals')
+      .select('id, token, title, max_files, max_file_size, expires_at, files_received, notification_email, webhook_url, created_at')
+      .eq('user_id', req.userId)
+      .order('created_at', { ascending: false });
 
-    const portals = result.rows.map(portal => ({
+    if (error) {
+      throw new Error(`Failed to fetch request portals: ${error.message}`);
+    }
+
+    const formattedPortals = portals.map(portal => ({
       ...portal,
       shareUrl: `${process.env.FRONTEND_URL}/request/${portal.token}`,
       isExpired: new Date() > new Date(portal.expires_at)
     }));
 
-    res.json({ portals });
+    res.json({ portals: formattedPortals });
 
   } catch (error) {
     console.error('Get request portals error:', error);
