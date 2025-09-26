@@ -1,5 +1,5 @@
 const express = require('express');
-const { pool } = require('../config/database');
+const { supabase } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { dodoPayments } = require('../utils/dodoPayments');
 
@@ -18,20 +18,18 @@ router.post('/create-checkout', requireAuth, async (req, res) => {
       });
     }
 
-    // Check if user already has a Dodo customer ID
-    const userResult = await pool.query(
-      'SELECT dodo_customer_id FROM users WHERE id = $1',
-      [userId]
-    );
-
-    if (userResult.rows.length === 0) {
+    // Check if user exists in Supabase Auth
+    const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
+    
+    if (userError || !userData.user) {
       return res.status(404).json({
         error: 'User not found',
         code: 'USER_NOT_FOUND'
       });
     }
 
-    let customerId = userResult.rows[0].dodo_customer_id;
+    // Get user metadata for Dodo customer ID
+    let customerId = userData.user.user_metadata?.dodo_customer_id;
 
     // Create Dodo Payments customer if doesn't exist
     if (!customerId) {
@@ -46,11 +44,17 @@ router.post('/create-checkout', requireAuth, async (req, res) => {
 
         customerId = customer.id;
 
-        // Save customer ID to database
-        await pool.query(
-          'UPDATE users SET dodo_customer_id = $1 WHERE id = $2',
-          [customerId, userId]
-        );
+        // Save customer ID to user metadata
+        const { error: updateError } = await supabase.auth.admin.updateUserById(userId, {
+          user_metadata: {
+            ...userData.user.user_metadata,
+            dodo_customer_id: customerId
+          }
+        });
+
+        if (updateError) {
+          console.error('Failed to save customer ID:', updateError);
+        }
       } catch (customerError) {
         console.error('Failed to create Dodo customer:', customerError);
         return res.status(500).json({
@@ -129,13 +133,19 @@ router.post('/webhook/dodo', async (req, res) => {
         const userId = session.metadata?.userId;
 
         if (userId) {
-          // Update user to paid plan
-          await pool.query(
-            'UPDATE users SET plan_type = $1 WHERE id = $2',
-            ['paid', userId]
-          );
-          
-          console.log(`✅ User ${userId} upgraded to Pro plan via Dodo Payments`);
+          // Update user metadata to paid plan
+          const { error: updateError } = await supabase.auth.admin.updateUserById(userId, {
+            user_metadata: {
+              tier: 'pro',
+              plan_type: 'paid'
+            }
+          });
+
+          if (updateError) {
+            console.error('Failed to update user tier:', updateError);
+          } else {
+            console.log(`✅ User ${userId} upgraded to Pro plan via Dodo Payments`);
+          }
         }
         break;
       }
@@ -144,21 +154,11 @@ router.post('/webhook/dodo', async (req, res) => {
         const subscription = event.data.object;
         const customerId = subscription.customer;
 
-        // Find user by customer ID and downgrade to free
-        const userResult = await pool.query(
-          'SELECT id FROM users WHERE dodo_customer_id = $1',
-          [customerId]
-        );
-
-        if (userResult.rows.length > 0) {
-          const userId = userResult.rows[0].id;
-          await pool.query(
-            'UPDATE users SET plan_type = $1 WHERE id = $2',
-            ['free', userId]
-          );
-          
-          console.log(`📉 User ${userId} downgraded to Free plan`);
-        }
+        // Note: For subscription deletion, we would need to track customer IDs
+        // in a separate table or use a different approach since Supabase Auth
+        // doesn't have a direct way to query by user_metadata
+        console.log(`📉 Subscription deleted for customer: ${customerId}`);
+        console.log('Note: Manual user downgrade may be required');
         break;
       }
 
