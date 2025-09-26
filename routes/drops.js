@@ -24,20 +24,31 @@ router.get('/:token', async (req, res) => {
       .from('drops')
       .select('*')
       .eq('token', token)
-      .gt('expires_at', new Date().toISOString())
       .limit(1);
 
     if (dropError || !drops || drops.length === 0) {
       return res.status(404).json({
-        error: 'Drop not found or expired',
+        error: 'Drop not found',
         code: 'DROP_NOT_FOUND'
       });
     }
 
     const drop = drops[0];
 
-    // Check if access limit has been reached
-    if (drop.view_count >= drop.max_access_count) {
+    // Check expiration based on type
+    const now = new Date();
+    
+    // Check time-based expiration
+    if (drop.expires_at && new Date(drop.expires_at) <= now) {
+      return res.status(410).json({
+        error: 'This drop has expired',
+        code: 'DROP_EXPIRED',
+        expiredAt: drop.expires_at
+      });
+    }
+    
+    // Check access limit expiration
+    if (drop.max_access_count && drop.view_count >= drop.max_access_count) {
       return res.status(410).json({
         error: `This drop has reached its access limit of ${drop.max_access_count} times and is no longer available`,
         code: 'DROP_ACCESS_LIMIT_REACHED',
