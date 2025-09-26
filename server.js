@@ -25,7 +25,13 @@ app.use(helmet({
 
 // CORS configuration - CRITICAL for frontend connection
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173', 'https://vanishdrop.com'],
+  origin: [
+    'http://localhost:3000', 
+    'http://localhost:5173', 
+    'https://vanishdrop.com',
+    'https://www.vanishdrop.com',
+    'https://vanishdrop.netlify.app' // Netlify preview URLs
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
@@ -33,12 +39,24 @@ app.use(cors({
 
 // Additional CORS headers for preflight requests
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  const allowedOrigins = [
+    'http://localhost:3000', 
+    'http://localhost:5173', 
+    'https://vanishdrop.com',
+    'https://www.vanishdrop.com',
+    'https://vanishdrop.netlify.app'
+  ];
+  
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
   
-  console.log(`📡 ${req.method} ${req.path} from ${req.headers.origin || 'unknown origin'}`);
+  console.log(`📡 ${req.method} ${req.path} from ${origin || 'unknown origin'}`);
   
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
