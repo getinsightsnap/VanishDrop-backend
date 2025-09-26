@@ -1,7 +1,7 @@
 const express = require('express');
 const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
-const { pool } = require('../config/database');
+const { supabase } = require('../config/database');
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -17,15 +17,16 @@ router.post('/', async (req, res) => {
     const now = new Date().toISOString();
     
     // Find expired files
-    const expiredFilesResult = await pool.query(`
-      SELECT id, file_path, expires_at, view_count, type
-      FROM drops 
-      WHERE (expires_at < $1 OR view_count >= 1)
-      AND file_path IS NOT NULL
-      AND type = 'file'
-    `, [now]);
+    const { data: expiredFiles, error: expiredError } = await supabase
+      .from('drops')
+      .select('id, file_path, expires_at, view_count, type, max_access_count')
+      .or(`expires_at.lt.${now},view_count.gte.max_access_count`)
+      .not('file_path', 'is', null)
+      .eq('type', 'file');
 
-    const expiredFiles = expiredFilesResult.rows;
+    if (expiredError) {
+      throw new Error(`Failed to fetch expired files: ${expiredError.message}`);
+    }
     let cleanedCount = 0;
 
     if (expiredFiles.length > 0) {
@@ -53,13 +54,17 @@ router.post('/', async (req, res) => {
 
       // Mark as expired in database
       const fileIds = expiredFiles.map(file => file.id);
-      await pool.query(`
-        UPDATE drops 
-        SET 
-          file_path = NULL,
-          updated_at = NOW()
-        WHERE id = ANY($1)
-      `, [fileIds]);
+      const { error: updateError } = await supabase
+        .from('drops')
+        .update({
+          file_path: null,
+          updated_at: new Date().toISOString()
+        })
+        .in('id', fileIds);
+
+      if (updateError) {
+        console.warn('Failed to update expired files:', updateError);
+      }
 
       console.log(`🧹 Cleaned up ${cleanedCount} expired files`);
     }
@@ -81,16 +86,41 @@ router.post('/', async (req, res) => {
 // Get cleanup statistics
 router.get('/stats', async (req, res) => {
   try {
-    const statsResult = await pool.query(`
-      SELECT 
-        COUNT(*) as total_drops,
-        COUNT(CASE WHEN expires_at < NOW() OR view_count >= 1 THEN 1 END) as expired_drops,
-        COUNT(CASE WHEN expires_at >= NOW() AND view_count = 0 THEN 1 END) as active_drops,
-        SUM(CASE WHEN file_path IS NOT NULL AND type = 'file' THEN file_size ELSE 0 END) as total_storage_used
-      FROM drops
-    `);
+    const now = new Date().toISOString();
+    
+    // Get total drops
+    const { count: totalDrops } = await supabase
+      .from('drops')
+      .select('*', { count: 'exact', head: true });
 
-    const stats = statsResult.rows[0];
+    // Get expired drops
+    const { count: expiredDrops } = await supabase
+      .from('drops')
+      .select('*', { count: 'exact', head: true })
+      .or(`expires_at.lt.${now},view_count.gte.max_access_count`);
+
+    // Get active drops
+    const { count: activeDrops } = await supabase
+      .from('drops')
+      .select('*', { count: 'exact', head: true })
+      .gte('expires_at', now)
+      .eq('view_count', 0);
+
+    // Get storage used
+    const { data: storageData } = await supabase
+      .from('drops')
+      .select('file_size')
+      .not('file_path', 'is', null)
+      .eq('type', 'file');
+
+    const totalStorageUsed = storageData?.reduce((sum, drop) => sum + (drop.file_size || 0), 0) || 0;
+
+    const stats = {
+      total_drops: totalDrops || 0,
+      expired_drops: expiredDrops || 0,
+      active_drops: activeDrops || 0,
+      total_storage_used: totalStorageUsed
+    };
 
     res.json({
       stats: {
