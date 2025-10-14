@@ -147,6 +147,8 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
     // If user doesn't exist in users table, create them with default values
     if (userError && userError.code === 'PGRST116') {
       console.log('User not found in users table, creating default profile...');
+      console.log('User ID:', user_id);
+      console.log('User email:', req.user.email);
       
       const now = new Date();
       const { data: newUser, error: createError } = await supabaseAdmin
@@ -168,11 +170,18 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
 
       if (createError) {
         console.error('Failed to create user profile:', createError);
-        return res.status(500).json({ error: 'Failed to create user profile' });
+        console.error('Create error details:', JSON.stringify(createError, null, 2));
+        return res.status(500).json({ 
+          error: 'Failed to create user profile',
+          details: createError.message,
+          code: createError.code
+        });
       }
 
+      console.log('User profile created successfully:', newUser);
       userData = newUser;
     } else if (userError) {
+      console.error('Error fetching user:', userError);
       throw userError;
     } else {
       userData = existingUser;
@@ -341,15 +350,23 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       has_thumbnail: !!thumbnailUrl
     });
   } catch (error) {
+    console.error('File upload error:', error);
+    console.error('Error stack:', error.stack);
+    console.error('User ID:', req.user?.id);
+    console.error('File:', req.file?.originalname, req.file?.size);
+    
     logError(error, {
       context: 'file_upload',
       userId: req.user?.id,
-      filename: req.file?.originalname
+      filename: req.file?.originalname,
+      fileSize: req.file?.size,
+      errorStack: error.stack
     });
     
     res.status(500).json({ 
       error: 'Failed to upload file',
-      message: error.message 
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
