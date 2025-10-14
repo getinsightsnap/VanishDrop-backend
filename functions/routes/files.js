@@ -78,15 +78,12 @@ router.post('/anonymous-upload', uploadLimiter, upload.single('file'), validateF
     const { data: fileRecord, error: dbError } = await supabaseAdmin
       .from('uploaded_files')
       .insert({
-        original_name: file.originalname,
-        file_name: fileName,
-        file_path: filePath,
-        file_url: publicUrl,
+        user_id: null, // Anonymous uploads have no user_id
+        filename: file.originalname,
         file_size: file.size,
-        mime_type: file.mimetype,
-        expires_at: expiresAt.toISOString(),
-        is_anonymous: true,
-        created_at: new Date().toISOString()
+        file_type: file.mimetype,
+        file_url: publicUrl,
+        expires_at: expiresAt.toISOString()
       })
       .select()
       .single();
