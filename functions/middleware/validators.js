@@ -16,8 +16,8 @@ export const handleValidationErrors = (req, res, next) => {
 export const validateFileUpload = [
   body('expires_in_hours')
     .optional()
-    .isInt({ min: 1, max: 168 })
-    .withMessage('Expiration must be between 1 and 168 hours (7 days)'),
+    .isFloat({ min: 0.016, max: 168 }) // 1 minute to 7 days
+    .withMessage('Expiration must be between 1 minute and 168 hours (7 days)'),
   handleValidationErrors
 ];
 
