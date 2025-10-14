@@ -1,23 +1,36 @@
 {
   "name": "vanishdrop-backend",
   "version": "1.0.0",
-  "description": "VanishDrop Backend API",
-  "main": "server.js",
+  "description": "VanishDrop Backend API with Supabase",
+  "main": "index.js",
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "node --watch functions/index.js",
+    "start": "node functions/index.js",
+    "deploy": "supabase functions deploy"
   },
+  "keywords": [
+    "file-sharing",
+    "supabase",
+    "api"
+  ],
+  "author": "VanishDrop",
+  "license": "MIT",
   "dependencies": {
-    "@supabase/supabase-js": "^2.55.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
-    "file-type": "^21.0.0",
-    "helmet": "^7.2.0",
-    "morgan": "^1.10.1",
-    "multer": "^2.0.2",
-    "node-cron": "^4.2.1",
-    "qrcode": "^1.5.4"
+    "dotenv": "^16.3.1",
+    "multer": "^1.4.5-lts.1",
+    "bcrypt": "^5.1.1",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "nodemailer": "^6.9.7",
+    "qrcode": "^1.5.3",
+    "node-cron": "^3.0.3",
+    "otplib": "^12.0.1",
+    "sharp": "^0.33.1",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
