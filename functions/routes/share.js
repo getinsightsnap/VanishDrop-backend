@@ -28,7 +28,7 @@ router.post('/anonymous', validateShareLink, async (req, res) => {
       .from('uploaded_files')
       .select('*')
       .eq('id', file_id)
-      .eq('is_anonymous', true)
+      .is('user_id', null)
       .single();
 
     if (fileError || !fileData) {
@@ -50,6 +50,7 @@ router.post('/anonymous', validateShareLink, async (req, res) => {
       .from('share_links')
       .insert({
         file_id,
+        user_id: null, // Anonymous share links have no user_id
         share_token,
         expires_at: expires_at || fileData.expires_at,
         max_opens: max_opens || null,
@@ -57,7 +58,6 @@ router.post('/anonymous', validateShareLink, async (req, res) => {
         password_hash,
         require_otp: require_otp || false,
         qr_code_enabled: qr_code_enabled || false,
-        is_anonymous: true,
         created_at: new Date().toISOString()
       })
       .select()
