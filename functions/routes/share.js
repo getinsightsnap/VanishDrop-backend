@@ -11,7 +11,114 @@ import QRCode from 'qrcode';
 
 const router = express.Router();
 
-// Create share link
+// Create anonymous share link (no authentication required)
+router.post('/anonymous', validateShareLink, async (req, res) => {
+  try {
+    const {
+      file_id,
+      expires_at,
+      max_opens,
+      password,
+      require_otp,
+      qr_code_enabled
+    } = req.body;
+
+    // Verify file exists and is anonymous
+    const { data: fileData, error: fileError } = await supabaseAdmin
+      .from('uploaded_files')
+      .select('*')
+      .eq('id', file_id)
+      .eq('is_anonymous', true)
+      .single();
+
+    if (fileError || !fileData) {
+      return res.status(404).json({ error: 'File not found or not accessible' });
+    }
+
+    // Generate unique share token
+    const share_token = Math.random().toString(36).substring(2, 15) + 
+                       Math.random().toString(36).substring(2, 15);
+
+    // Hash password if provided
+    let password_hash = null;
+    if (password && password.trim().length > 0) {
+      const saltRounds = 10;
+      password_hash = await bcrypt.hash(password, saltRounds);
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('share_links')
+      .insert({
+        file_id,
+        share_token,
+        expires_at: expires_at || fileData.expires_at,
+        max_opens: max_opens || null,
+        current_opens: 0,
+        password_hash,
+        require_otp: require_otp || false,
+        qr_code_enabled: qr_code_enabled || false,
+        is_anonymous: true,
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) {
+      logger.error('Share link creation error:', error);
+      return res.status(500).json({ error: 'Failed to create share link' });
+    }
+
+    // Generate QR code if requested
+    let qr_code_url = null;
+    if (qr_code_enabled) {
+      try {
+        const shareUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/share/${share_token}`;
+        const qrCodeDataURL = await QRCode.toDataURL(shareUrl);
+        
+        // Upload QR code to storage
+        const qrFileName = `qr-codes/${share_token}.png`;
+        const qrBuffer = Buffer.from(qrCodeDataURL.split(',')[1], 'base64');
+        
+        const { error: qrUploadError } = await supabaseAdmin.storage
+          .from('files')
+          .upload(qrFileName, qrBuffer, {
+            contentType: 'image/png',
+            cacheControl: '3600',
+            upsert: true
+          });
+
+        if (!qrUploadError) {
+          const { data: { publicUrl } } = supabaseAdmin.storage
+            .from('files')
+            .getPublicUrl(qrFileName);
+          qr_code_url = publicUrl;
+        }
+      } catch (qrError) {
+        logger.warn('QR code generation failed:', qrError);
+      }
+    }
+
+    logger.info(`Anonymous share link created: ${share_token}`);
+
+    res.status(201).json({
+      share_token,
+      share_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/share/${share_token}`,
+      expires_at: data.expires_at,
+      max_opens: data.max_opens,
+      has_password: !!password_hash,
+      require_otp: data.require_otp,
+      qr_code_url,
+      file_name: fileData.original_name,
+      file_size: fileData.file_size
+    });
+
+  } catch (error) {
+    logger.error('Anonymous share link creation error:', error);
+    res.status(500).json({ error: 'Failed to create share link' });
+  }
+});
+
+// Create share link - AUTHENTICATED USERS
 router.post('/', authMiddleware, validateShareLink, async (req, res) => {
   try {
     const {
