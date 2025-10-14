@@ -28,7 +28,107 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Upload file (with actual file upload to Supabase Storage)
+// Anonymous upload file (no authentication required)
+router.post('/anonymous-upload', uploadLimiter, upload.single('file'), validateFileUpload, async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+
+    const { expires_in_hours } = req.body;
+    const file = req.file;
+
+    // Anonymous uploads have a 1GB lifetime limit (same as free users)
+    const maxFileSize = 1024 * 1024 * 1024; // 1GB
+    if (file.size > maxFileSize) {
+      return res.status(413).json({ 
+        error: 'File too large. Maximum size is 1GB for anonymous uploads.' 
+      });
+    }
+
+    // Generate unique file path
+    const fileExtension = file.originalname.split('.').pop() || '';
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExtension}`;
+    const filePath = `anonymous-uploads/${fileName}`;
+
+    // Upload to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+      .from('files')
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (uploadError) {
+      logger.error('Storage upload error:', uploadError);
+      return res.status(500).json({ error: 'Failed to upload file to storage' });
+    }
+
+    // Generate public URL
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from('files')
+      .getPublicUrl(filePath);
+
+    // Calculate expiration
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + (parseFloat(expires_in_hours) || 24));
+
+    // Save file metadata to database (without user_id)
+    const { data: fileRecord, error: dbError } = await supabaseAdmin
+      .from('uploaded_files')
+      .insert({
+        original_name: file.originalname,
+        file_name: fileName,
+        file_path: filePath,
+        file_url: publicUrl,
+        file_size: file.size,
+        mime_type: file.mimetype,
+        expires_at: expiresAt.toISOString(),
+        is_anonymous: true,
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (dbError) {
+      logger.error('Database insert error:', dbError);
+      // Clean up uploaded file
+      await supabaseAdmin.storage.from('files').remove([filePath]);
+      return res.status(500).json({ error: 'Failed to save file metadata' });
+    }
+
+    // Generate thumbnail for images
+    if (supportsThumbnail(file.mimetype)) {
+      try {
+        const thumbnailUrl = await generateImageThumbnail(file.buffer, fileName);
+        await supabaseAdmin
+          .from('uploaded_files')
+          .update({ thumbnail_url: thumbnailUrl })
+          .eq('id', fileRecord.id);
+      } catch (thumbnailError) {
+        logger.warn('Thumbnail generation failed:', thumbnailError);
+      }
+    }
+
+    logger.info(`Anonymous file uploaded: ${file.originalname} (${file.size} bytes)`);
+
+    res.status(201).json({
+      file_id: fileRecord.id,
+      file_name: file.originalname,
+      file_size: file.size,
+      file_url: publicUrl,
+      expires_at: expiresAt.toISOString(),
+      message: 'File uploaded successfully'
+    });
+
+  } catch (error) {
+    logger.error('Anonymous upload error:', error);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
+// Upload file (with actual file upload to Supabase Storage) - AUTHENTICATED USERS
 router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), validateFileUpload, async (req, res) => {
   try {
     if (!req.file) {
