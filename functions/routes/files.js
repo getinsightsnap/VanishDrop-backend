@@ -39,37 +39,59 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
     const user_id = req.user.id;
     const file = req.file;
 
-    // Check daily upload limit
+    // Check upload limits
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
-      .select('daily_upload_used, daily_upload_reset_at, subscription_tier')
+      .select('daily_upload_used, daily_upload_reset_at, subscription_tier, lifetime_upload_used')
       .eq('id', user_id)
       .single();
 
     if (userError) throw userError;
 
-    // Check if 24 hours have passed since last reset
-    const resetTime = new Date(userData.daily_upload_reset_at);
     const now = new Date();
-    const hoursPassed = (now.getTime() - resetTime.getTime()) / (1000 * 60 * 60);
-
     let dailyUsed = userData.daily_upload_used;
-    if (hoursPassed >= 24) {
-      dailyUsed = 0;
-      await supabaseAdmin
-        .from('users')
-        .update({
-          daily_upload_used: 0,
-          daily_upload_reset_at: now.toISOString()
-        })
-        .eq('id', user_id);
+    let lifetimeUsed = userData.lifetime_upload_used || 0;
+
+    if (userData.subscription_tier === 'pro') {
+      // Pro users: Check daily limits
+      const resetTime = new Date(userData.daily_upload_reset_at);
+      const hoursPassed = (now.getTime() - resetTime.getTime()) / (1000 * 60 * 60);
+
+      if (hoursPassed >= 24) {
+        dailyUsed = 0;
+        await supabaseAdmin
+          .from('users')
+          .update({
+            daily_upload_used: 0,
+            daily_upload_reset_at: now.toISOString()
+          })
+          .eq('id', user_id);
+      }
+
+      // Check daily limit for Pro users
+      const dailyLimit = 10 * 1024 * 1024 * 1024; // 10GB
+      if (dailyUsed + file.size > dailyLimit) {
+        return res.status(403).json({
+          error: 'Daily upload limit exceeded',
+          limit: dailyLimit,
+          used: dailyUsed,
+          fileSize: file.size
+        });
+      }
+    } else {
+      // Free users: Check lifetime limits
+      const lifetimeLimit = 1024 * 1024 * 1024; // 1GB
+      if (lifetimeUsed + file.size > lifetimeLimit) {
+        return res.status(403).json({
+          error: 'Lifetime upload limit exceeded',
+          limit: lifetimeLimit,
+          used: lifetimeUsed,
+          fileSize: file.size
+        });
+      }
     }
 
-    // Check limits based on subscription
-    const dailyLimit = userData.subscription_tier === 'pro' 
-      ? 10 * 1024 * 1024 * 1024 // 10GB
-      : 100 * 1024 * 1024; // 100MB
-
+    // Check file size limits
     const maxFileSize = userData.subscription_tier === 'pro'
       ? 10 * 1024 * 1024 * 1024 // 10GB per file
       : 100 * 1024 * 1024; // 100MB per file
@@ -78,15 +100,6 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       return res.status(403).json({
         error: `File size exceeds ${userData.subscription_tier === 'pro' ? '10GB' : '100MB'} limit`,
         maxSize: maxFileSize,
-        fileSize: file.size
-      });
-    }
-
-    if (dailyUsed + file.size > dailyLimit) {
-      return res.status(403).json({
-        error: 'Daily upload limit exceeded',
-        limit: dailyLimit,
-        used: dailyUsed,
         fileSize: file.size
       });
     }
@@ -169,13 +182,22 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       throw fileError;
     }
 
-    // Update daily usage
-    await supabaseAdmin
-      .from('users')
-      .update({
-        daily_upload_used: dailyUsed + file.size
-      })
-      .eq('id', user_id);
+    // Update usage based on subscription tier
+    if (userData.subscription_tier === 'pro') {
+      await supabaseAdmin
+        .from('users')
+        .update({
+          daily_upload_used: dailyUsed + file.size
+        })
+        .eq('id', user_id);
+    } else {
+      await supabaseAdmin
+        .from('users')
+        .update({
+          lifetime_upload_used: lifetimeUsed + file.size
+        })
+        .eq('id', user_id);
+    }
 
     // Log successful upload
     logFileUpload(user_id, file.originalname, file.size, true);
