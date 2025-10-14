@@ -140,13 +140,46 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
     const file = req.file;
 
     // Check upload limits
-    const { data: userData, error: userError } = await supabaseAdmin
+    let userData;
+    const { data: existingUser, error: userError } = await supabaseAdmin
       .from('users')
       .select('daily_upload_used, daily_upload_reset_at, subscription_tier, lifetime_upload_used')
       .eq('id', user_id)
       .single();
 
-    if (userError) throw userError;
+    // If user doesn't exist in users table, create them with default values
+    if (userError && userError.code === 'PGRST116') {
+      console.log('User not found in users table, creating default profile...');
+      
+      const now = new Date();
+      const { data: newUser, error: createError } = await supabaseAdmin
+        .from('users')
+        .insert({
+          id: user_id,
+          email: req.user.email,
+          subscription_tier: 'free',
+          daily_upload_used: 0,
+          daily_upload_reset_at: now.toISOString(),
+          lifetime_upload_used: 0,
+          trial_used: false,
+          trial_end_date: null,
+          created_at: now.toISOString(),
+          updated_at: now.toISOString()
+        })
+        .select()
+        .single();
+
+      if (createError) {
+        console.error('Failed to create user profile:', createError);
+        return res.status(500).json({ error: 'Failed to create user profile' });
+      }
+
+      userData = newUser;
+    } else if (userError) {
+      throw userError;
+    } else {
+      userData = existingUser;
+    }
 
     const now = new Date();
     let dailyUsed = userData.daily_upload_used;
