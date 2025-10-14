@@ -1,0 +1,105 @@
+// Dodo Payments Webhook Handler
+// Docs: https://docs.dodopayments.com/developer-resources/webhooks
+
+const { createClient } = require('@supabase/supabase-js');
+
+const supabaseUrl = process.env.SUPABASE_URL || 'https://mafttcvhinlestxrtjfa.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY; // Service key for admin operations
+
+exports.handler = async (event, context) => {
+  // Only allow POST requests
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      body: JSON.stringify({ error: 'Method not allowed' }),
+    };
+  }
+
+  try {
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    
+    // Parse webhook payload
+    const payload = JSON.parse(event.body);
+    
+    console.log('Received Dodo Payments webhook:', payload);
+
+    // Verify webhook signature (optional but recommended)
+    // TODO: Implement webhook signature verification when available in Dodo Payments docs
+    
+    // Handle different webhook events
+    const eventType = payload.event_type || payload.type;
+    
+    switch (eventType) {
+      case 'payment.succeeded':
+      case 'subscription.created':
+      case 'subscription.activated':
+        // Extract customer and subscription data
+        const customerId = payload.data?.customer_id;
+        const metadata = payload.data?.metadata || {};
+        const userId = metadata.user_id;
+        
+        if (!userId) {
+          console.error('No user_id in webhook metadata');
+          return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Missing user_id in metadata' }),
+          };
+        }
+
+        // Update user subscription to pro
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({
+            subscription_tier: 'pro',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userId);
+
+        if (updateError) {
+          console.error('Error updating user subscription:', updateError);
+          throw updateError;
+        }
+
+        console.log(`Successfully upgraded user ${userId} to Pro`);
+        
+        break;
+
+      case 'subscription.cancelled':
+      case 'subscription.expired':
+        // Handle subscription cancellation
+        const cancelUserId = payload.data?.metadata?.user_id;
+        
+        if (cancelUserId) {
+          await supabase
+            .from('users')
+            .update({
+              subscription_tier: 'free',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', cancelUserId);
+            
+          console.log(`Downgraded user ${cancelUserId} to Free`);
+        }
+        
+        break;
+
+      default:
+        console.log(`Unhandled webhook event: ${eventType}`);
+    }
+
+    // Return success response
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ received: true }),
+    };
+    
+  } catch (error) {
+    console.error('Webhook processing error:', error);
+    
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Internal server error', message: error.message }),
+    };
+  }
+};
+
