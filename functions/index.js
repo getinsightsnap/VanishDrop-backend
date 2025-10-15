@@ -78,7 +78,16 @@ app.get('/debug', (req, res) => {
 // Test upload route registration
 app.get('/debug/routes', (req, res) => {
   const routes = [];
-  app._router.stack.forEach((middleware) => {
+  const middlewareDebug = [];
+  
+  app._router.stack.forEach((middleware, index) => {
+    middlewareDebug.push({
+      index: index,
+      name: middleware.name,
+      regexp: middleware.regexp ? middleware.regexp.source : 'N/A',
+      keys: middleware.keys ? middleware.keys.length : 0
+    });
+    
     if (middleware.route) {
       routes.push({
         path: middleware.route.path,
@@ -122,6 +131,14 @@ app.get('/debug/routes', (req, res) => {
           description: 'Analytics routes',
           regexp: regexpSource
         });
+      } else {
+        // Log any router that doesn't match our expected patterns
+        routes.push({
+          path: 'UNKNOWN_ROUTER',
+          methods: ['UNKNOWN'],
+          description: 'Router found but not recognized',
+          regexp: regexpSource
+        });
       }
     }
   });
@@ -130,6 +147,7 @@ app.get('/debug/routes', (req, res) => {
     status: 'Routes debug',
     routes: routes,
     totalMiddleware: app._router.stack.length,
+    middlewareDebug: middlewareDebug.slice(0, 10), // Show first 10 for debugging
     message: 'Available routes listed above'
   });
 });
