@@ -85,12 +85,42 @@ app.get('/debug/routes', (req, res) => {
         methods: Object.keys(middleware.route.methods)
       });
     } else if (middleware.name === 'router') {
-      // Handle mounted routers
-      if (middleware.regexp.source.includes('api/files')) {
+      // Handle mounted routers - check the regexp pattern
+      const regexpSource = middleware.regexp.source;
+      if (regexpSource.includes('api/files')) {
         routes.push({
           path: '/api/files/*',
           methods: ['POST', 'GET'],
-          description: 'File upload routes'
+          description: 'File upload routes',
+          regexp: regexpSource
+        });
+      } else if (regexpSource.includes('api/users')) {
+        routes.push({
+          path: '/api/users/*',
+          methods: ['GET', 'POST', 'PUT'],
+          description: 'User routes',
+          regexp: regexpSource
+        });
+      } else if (regexpSource.includes('api/share')) {
+        routes.push({
+          path: '/api/share/*',
+          methods: ['GET', 'POST'],
+          description: 'Share routes',
+          regexp: regexpSource
+        });
+      } else if (regexpSource.includes('api/admin')) {
+        routes.push({
+          path: '/api/admin/*',
+          methods: ['GET', 'POST'],
+          description: 'Admin routes',
+          regexp: regexpSource
+        });
+      } else if (regexpSource.includes('api/analytics')) {
+        routes.push({
+          path: '/api/analytics/*',
+          methods: ['GET'],
+          description: 'Analytics routes',
+          regexp: regexpSource
         });
       }
     }
@@ -99,6 +129,7 @@ app.get('/debug/routes', (req, res) => {
   res.json({
     status: 'Routes debug',
     routes: routes,
+    totalMiddleware: app._router.stack.length,
     message: 'Available routes listed above'
   });
 });
