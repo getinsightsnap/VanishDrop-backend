@@ -128,7 +128,21 @@ router.post('/anonymous-upload', uploadLimiter, upload.single('file'), validateF
 // Upload file (with actual file upload to Supabase Storage) - AUTHENTICATED USERS
 router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), validateFileUpload, async (req, res) => {
   try {
+    console.log('=== UPLOAD REQUEST START ===');
+    console.log('Request body:', req.body);
+    console.log('Request file:', req.file ? {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype
+    } : 'No file');
+    console.log('User:', req.user ? {
+      id: req.user.id,
+      email: req.user.email
+    } : 'No user');
+
     if (!req.file) {
+      console.log('ERROR: No file provided');
       return res.status(400).json({ error: 'No file provided' });
     }
 
