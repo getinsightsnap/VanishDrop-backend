@@ -75,6 +75,51 @@ app.get('/debug', (req, res) => {
   });
 });
 
+// Test upload route registration
+app.get('/debug/routes', (req, res) => {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push({
+        path: middleware.route.path,
+        methods: Object.keys(middleware.route.methods)
+      });
+    } else if (middleware.name === 'router') {
+      // Handle mounted routers
+      if (middleware.regexp.source.includes('api/files')) {
+        routes.push({
+          path: '/api/files/*',
+          methods: ['POST', 'GET'],
+          description: 'File upload routes'
+        });
+      }
+    }
+  });
+  
+  res.json({
+    status: 'Routes debug',
+    routes: routes,
+    message: 'Available routes listed above'
+  });
+});
+
+// Test upload endpoint (simplified)
+app.post('/debug/upload-test', async (req, res) => {
+  try {
+    res.json({
+      status: 'Upload test endpoint working',
+      timestamp: new Date().toISOString(),
+      message: 'This endpoint works - issue might be in upload middleware or route'
+    });
+  } catch (err) {
+    console.error('Upload test error:', err);
+    res.status(500).json({
+      error: 'Upload test failed',
+      details: err.message
+    });
+  }
+});
+
 // Debug endpoint to test database connection
 app.get('/debug/db', async (req, res) => {
   try {
