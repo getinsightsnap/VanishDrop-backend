@@ -9,7 +9,7 @@ import analyticsRoutes from './routes/analytics.js';
 import { generalLimiter } from './middleware/rateLimiter.js';
 import { initializeCronJobs } from './jobs/cleanup.js';
 import logger from './utils/logger.js';
-import { supabaseAdmin } from './config/supabase.js';
+import { supabaseAdmin } from '../config/supabase.js';
 
 dotenv.config();
 
