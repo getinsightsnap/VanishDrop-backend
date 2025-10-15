@@ -4,7 +4,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 import { uploadLimiter } from '../middleware/rateLimiter.js';
 import { validateFileUpload, validateUUID } from '../middleware/validators.js';
-import { generateImageThumbnail, uploadThumbnail, supportsThumbnail } from '../utils/thumbnails.js';
+// import { generateImageThumbnail, uploadThumbnail, supportsThumbnail } from '../utils/thumbnails.js';
 import logger, { logFileUpload, logError } from '../utils/logger.js';
 import crypto from 'crypto';
 
@@ -96,17 +96,17 @@ router.post('/anonymous-upload', uploadLimiter, upload.single('file'), validateF
     }
 
     // Generate thumbnail for images
-    if (supportsThumbnail(file.mimetype)) {
-      try {
-        const thumbnailUrl = await generateImageThumbnail(file.buffer, fileName);
-        await supabaseAdmin
-          .from('uploaded_files')
-          .update({ thumbnail_url: thumbnailUrl })
-          .eq('id', fileRecord.id);
-      } catch (thumbnailError) {
-        logger.warn('Thumbnail generation failed:', thumbnailError);
-      }
-    }
+    // if (supportsThumbnail(file.mimetype)) {
+    //   try {
+    //     const thumbnailUrl = await generateImageThumbnail(file.buffer, fileName);
+    //     await supabaseAdmin
+    //       .from('uploaded_files')
+    //       .update({ thumbnail_url: thumbnailUrl })
+    //       .eq('id', fileRecord.id);
+    //   } catch (thumbnailError) {
+    //     logger.warn('Thumbnail generation failed:', thumbnailError);
+    //   }
+    // }
 
     logger.info(`Anonymous file uploaded: ${file.originalname} (${file.size} bytes)`);
 
@@ -275,20 +275,20 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
 
     // Generate thumbnail if it's an image
     let thumbnailUrl = null;
-    if (supportsThumbnail(file.mimetype)) {
-      const thumbnailResult = await generateImageThumbnail(file.buffer, {
-        width: 300,
-        height: 300,
-        fit: 'cover'
-      });
+    // if (supportsThumbnail(file.mimetype)) {
+    //   const thumbnailResult = await generateImageThumbnail(file.buffer, {
+    //     width: 300,
+    //     height: 300,
+    //     fit: 'cover'
+    //   });
 
-      if (thumbnailResult.success) {
-        const uploadResult = await uploadThumbnail(user_id, uniqueId, thumbnailResult.thumbnail);
-        if (uploadResult.success) {
-          thumbnailUrl = uploadResult.thumbnailUrl;
-        }
-      }
-    }
+    //   if (thumbnailResult.success) {
+    //     const uploadResult = await uploadThumbnail(user_id, uniqueId, thumbnailResult.thumbnail);
+    //     if (uploadResult.success) {
+    //       thumbnailUrl = uploadResult.thumbnailUrl;
+    //     }
+    //   }
+    // }
 
     // Create file record in database
     const { data: fileData, error: fileError } = await supabaseAdmin
