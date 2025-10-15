@@ -2,10 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import fileRoutes from './routes/files.js';
-import userRoutes from './routes/users.js';
-import shareRoutes from './routes/share.js';
-import adminRoutes from './routes/admin.js';
-import analyticsRoutes from './routes/analytics.js';
+// import userRoutes from './routes/users.js';
+// import shareRoutes from './routes/share.js';
+// import adminRoutes from './routes/admin.js';
+// import analyticsRoutes from './routes/analytics.js';
 import { generalLimiter } from './middleware/rateLimiter.js';
 import { initializeCronJobs } from './jobs/cleanup.js';
 import logger from './utils/logger.js';
@@ -153,10 +153,10 @@ app.get('/debug/db', async (req, res) => {
 
 // API Routes
 app.use('/api/files', fileRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/share', shareRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/analytics', analyticsRoutes);
+// app.use('/api/users', userRoutes);
+// app.use('/api/share', shareRoutes);
+// app.use('/api/admin', adminRoutes);
+// app.use('/api/analytics', analyticsRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
