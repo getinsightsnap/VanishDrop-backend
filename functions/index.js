@@ -66,6 +66,15 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Simple debug endpoint
+app.get('/debug', (req, res) => {
+  res.json({ 
+    status: 'Debug endpoint working',
+    timestamp: new Date().toISOString(),
+    message: 'Backend is responding correctly'
+  });
+});
+
 // Debug endpoint to test database connection
 app.get('/debug/db', async (req, res) => {
   try {
