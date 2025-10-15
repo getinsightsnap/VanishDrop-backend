@@ -9,6 +9,7 @@ import analyticsRoutes from './routes/analytics.js';
 import { generalLimiter } from './middleware/rateLimiter.js';
 import { initializeCronJobs } from './jobs/cleanup.js';
 import logger from './utils/logger.js';
+import { supabaseAdmin } from './config/supabase.js';
 
 dotenv.config();
 
@@ -63,6 +64,37 @@ app.use('/api/', generalLimiter);
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Debug endpoint to test database connection
+app.get('/debug/db', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('id, email, subscription_tier, daily_upload_used')
+      .limit(5);
+    
+    if (error) {
+      console.error('Database error:', error);
+      return res.status(500).json({ 
+        error: 'Database connection failed',
+        details: error.message,
+        code: error.code
+      });
+    }
+    
+    res.json({ 
+      status: 'Database connected',
+      users: data,
+      count: data?.length || 0
+    });
+  } catch (err) {
+    console.error('Debug endpoint error:', err);
+    res.status(500).json({ 
+      error: 'Debug endpoint failed',
+      details: err.message
+    });
+  }
 });
 
 // API Routes
