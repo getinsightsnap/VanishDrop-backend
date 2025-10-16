@@ -186,6 +186,9 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
         .eq('id', req.user.id);
     }
 
+    // Get download_allowed from request body (default to true)
+    const { download_allowed = true } = req.body;
+
     const { data, error } = await supabaseAdmin
       .from('share_links')
       .insert({
@@ -197,7 +200,8 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
         password_hash,
         require_otp,
         qr_code_enabled,
-        has_watermark: shouldApplyWatermark
+        has_watermark: shouldApplyWatermark,
+        download_allowed
       })
       .select()
       .single();
