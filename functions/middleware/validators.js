@@ -35,8 +35,7 @@ export const validateShareLink = [
     .isUUID()
     .withMessage('File ID must be a valid UUID'),
   body('expires_at')
-    .notEmpty()
-    .withMessage('Expiration date is required')
+    .optional()
     .isISO8601()
     .withMessage('Expiration date must be a valid ISO 8601 date'),
   body('max_opens')
