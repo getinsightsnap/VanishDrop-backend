@@ -4,12 +4,32 @@ import logger from '../utils/logger.js';
 
 const router = express.Router();
 
+// Test endpoint to verify webhook URL is accessible
+router.get('/dodo', (req, res) => {
+  res.json({ 
+    message: 'Webhook endpoint is accessible',
+    timestamp: new Date().toISOString(),
+    method: 'GET'
+  });
+});
+
 // Dodo Payments Webhook Handler
 // Docs: https://docs.dodopayments.com/developer-resources/webhooks
 router.post('/dodo', async (req, res) => {
   try {
-    console.log('Received Dodo Payments webhook:', req.body);
-    logger.info('Dodo Payments webhook received', { body: req.body });
+    console.log('=== WEBHOOK CALLED ===');
+    console.log('Headers:', req.headers);
+    console.log('Body:', req.body);
+    console.log('Method:', req.method);
+    console.log('URL:', req.url);
+    console.log('========================');
+    
+    logger.info('Dodo Payments webhook received', { 
+      headers: req.headers,
+      body: req.body,
+      method: req.method,
+      url: req.url
+    });
 
     // Handle different webhook events
     const eventType = req.body.event_type || req.body.type;
