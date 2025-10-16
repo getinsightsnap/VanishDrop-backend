@@ -35,25 +35,25 @@ export const validateShareLink = [
     .isUUID()
     .withMessage('File ID must be a valid UUID'),
   body('expires_at')
-    .optional()
+    .optional({ values: 'falsy' })
     .isISO8601()
     .withMessage('Expiration date must be a valid ISO 8601 date'),
   body('max_opens')
-    .optional()
+    .optional({ values: 'falsy' })
     .isInt({ min: 1, max: 10000 })
     .withMessage('Max opens must be between 1 and 10000'),
   body('password')
-    .optional()
+    .optional({ values: 'falsy' })
     .isString()
     .isLength({ min: 4, max: 100 })
     .withMessage('Password must be between 4 and 100 characters'),
   body('require_otp')
-    .optional()
-    .isBoolean()
+    .optional({ values: 'falsy' })
+    .isBoolean({ strict: false })
     .withMessage('require_otp must be a boolean'),
   body('qr_code_enabled')
-    .optional()
-    .isBoolean()
+    .optional({ values: 'falsy' })
+    .isBoolean({ strict: false })
     .withMessage('qr_code_enabled must be a boolean'),
   handleValidationErrors
 ];
