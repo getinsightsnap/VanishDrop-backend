@@ -244,14 +244,12 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       }
     }
 
-    // Check file size limits
-    const maxFileSize = userData.subscription_tier === 'pro'
-      ? 10 * 1024 * 1024 * 1024 // 10GB per file
-      : 100 * 1024 * 1024; // 100MB per file
+    // Check file size limits - Free users can upload any size up to their lifetime limit
+    const maxFileSize = 10 * 1024 * 1024 * 1024; // 10GB per file for all users
 
     if (file.size > maxFileSize) {
       return res.status(403).json({
-        error: `File size exceeds ${userData.subscription_tier === 'pro' ? '10GB' : '100MB'} limit`,
+        error: 'File size exceeds 10GB limit',
         maxSize: maxFileSize,
         fileSize: file.size
       });
