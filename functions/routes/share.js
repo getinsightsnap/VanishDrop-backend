@@ -310,6 +310,7 @@ router.get('/:token', async (req, res) => {
         ...data,
         password_hash: undefined,
         has_password: !!data.password_hash,
+        has_watermark: data.has_watermark || false,
         uploaded_files: data.password_hash ? {
           id: data.uploaded_files.id,
           filename: data.uploaded_files.filename,
