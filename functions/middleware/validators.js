@@ -55,6 +55,10 @@ export const validateShareLink = [
     .optional({ values: 'falsy' })
     .isBoolean({ strict: false })
     .withMessage('qr_code_enabled must be a boolean'),
+  body('download_allowed')
+    .optional({ values: 'falsy' })
+    .isBoolean({ strict: false })
+    .withMessage('download_allowed must be a boolean'),
   handleValidationErrors
 ];
 
