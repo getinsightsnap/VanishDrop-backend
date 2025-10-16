@@ -52,7 +52,7 @@ router.post('/anonymous', validateShareLink, async (req, res) => {
         file_id,
         user_id: null, // Anonymous share links have no user_id
         share_token,
-        expires_at: expires_at || fileData.expires_at,
+        expires_at: expires_at || (password_hash ? null : fileData.expires_at), // No expiration if password protected
         max_opens: max_opens || null,
         current_opens: 0,
         password_hash,
@@ -166,7 +166,7 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
         file_id,
         user_id: req.user.id,
         share_token,
-        expires_at,
+        expires_at: expires_at || (password_hash ? null : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()), // No expiration if password protected, default 24h otherwise
         max_opens,
         password_hash,
         require_otp,
