@@ -26,20 +26,35 @@ router.get('/profile', authMiddleware, async (req, res) => {
 // Update subscription tier
 router.patch('/subscription', authMiddleware, validateSubscriptionUpdate, async (req, res) => {
   try {
-    const { subscription_tier } = req.body;
+    const { subscription_tier, dodo_session_id } = req.body;
+
+    console.log('Updating subscription for user:', req.user.id);
+    console.log('New tier:', subscription_tier);
+    console.log('Dodo session ID:', dodo_session_id);
 
     if (!['free', 'pro'].includes(subscription_tier)) {
       return res.status(400).json({ error: 'Invalid subscription tier' });
     }
 
+    const updateData = {
+      subscription_tier,
+      ...(dodo_session_id && { dodo_session_id }),
+      ...(subscription_tier === 'pro' && { upgraded_at: new Date().toISOString() })
+    };
+
     const { data, error } = await supabaseAdmin
       .from('users')
-      .update({ subscription_tier })
+      .update(updateData)
       .eq('id', req.user.id)
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase error updating subscription:', error);
+      throw error;
+    }
+
+    console.log('Subscription updated successfully:', data);
 
     res.json({ user: data });
   } catch (error) {
