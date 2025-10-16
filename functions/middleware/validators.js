@@ -4,6 +4,12 @@ import { body, param, query, validationResult } from 'express-validator';
 export const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
+    console.log('=== VALIDATION ERROR ===');
+    console.log('Request body:', req.body);
+    console.log('Validation errors:', errors.array());
+    console.log('Route:', req.route?.path || req.path);
+    console.log('Method:', req.method);
+    
     return res.status(400).json({ 
       error: 'Validation failed', 
       details: errors.array() 
