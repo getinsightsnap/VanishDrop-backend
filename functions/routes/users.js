@@ -86,6 +86,52 @@ router.post('/trial', authMiddleware, async (req, res) => {
   }
 });
 
+// Get user upload usage
+router.get('/usage', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get user's subscription tier
+    const { data: userData, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('subscription_tier')
+      .eq('id', userId)
+      .single();
+
+    if (userError) throw userError;
+
+    // Get all uploaded files
+    const { data: files, error: filesError } = await supabaseAdmin
+      .from('uploaded_files')
+      .select('file_size, created_at')
+      .eq('user_id', userId);
+
+    if (filesError) throw filesError;
+
+    let usage = 0;
+    
+    if (userData.subscription_tier === 'pro') {
+      // Pro users: Daily usage (last 24 hours)
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const dailyFiles = files?.filter(file => 
+        new Date(file.created_at) > oneDayAgo
+      ) || [];
+      usage = dailyFiles.reduce((sum, file) => sum + file.file_size, 0);
+    } else {
+      // Free users: Lifetime usage (all files)
+      usage = files?.reduce((sum, file) => sum + file.file_size, 0) || 0;
+    }
+
+    res.json({
+      usage,
+      subscription_tier: userData.subscription_tier
+    });
+  } catch (error) {
+    console.error('Error fetching usage:', error);
+    res.status(500).json({ error: 'Failed to fetch usage' });
+  }
+});
+
 // Get user statistics
 router.get('/stats', authMiddleware, async (req, res) => {
   try {
