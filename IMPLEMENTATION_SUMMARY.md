@@ -321,7 +321,7 @@ LOG_LEVEL=info
 1. Connect GitHub repository
 2. Set all environment variables
 3. Deploy: `railway up`
-4. Configure Dodo Payments webhook: `https://your-app.railway.app/.netlify/functions/dodo-webhook`
+4. Configure Dodo Payments webhook: `https://your-app.railway.app/api/webhook/dodo`
 
 ### **Post-Deployment**
 - [ ] Test file upload
