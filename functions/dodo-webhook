@@ -31,7 +31,7 @@ exports.handler = async (event, context) => {
     
     switch (eventType) {
       case 'payment.succeeded':
-      case 'subscription.created':
+      case 'subscription.active':
       case 'subscription.activated':
         // Extract customer and subscription data
         const customerId = payload.data?.customer_id;
