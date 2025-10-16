@@ -6,6 +6,7 @@ import userRoutes from './routes/users.js';
 import shareRoutes from './routes/share.js';
 import adminRoutes from './routes/admin.js';
 import analyticsRoutes from './routes/analytics.js';
+import webhookRoutes from './routes/webhook.js';
 import { generalLimiter } from './middleware/rateLimiter.js';
 import { initializeCronJobs } from './jobs/cleanup.js';
 import logger from './utils/logger.js';
@@ -206,6 +207,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/share', shareRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/webhook', webhookRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
