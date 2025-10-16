@@ -173,7 +173,6 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
     }
 
     // Check QR code limit for free users
-    const { qr_code_enabled } = req.body;
     if (qr_code_enabled && userData.subscription_tier === 'free' && userData.qr_codes_generated >= 5) {
       return res.status(403).json({ 
         error: 'QR code limit reached',
