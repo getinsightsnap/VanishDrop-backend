@@ -160,16 +160,25 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
       password_hash = await bcrypt.hash(password, saltRounds);
     }
 
-    // Check user's watermark status
+    // Check user's watermark status and QR code limit
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
-      .select('subscription_tier, free_uploads_without_watermark')
+      .select('subscription_tier, free_uploads_without_watermark, qr_codes_generated')
       .eq('id', req.user.id)
       .single();
 
     if (userError) {
       console.error('Error fetching user data:', userError);
       throw new Error('Failed to fetch user data');
+    }
+
+    // Check QR code limit for free users
+    const { qr_code_enabled } = req.body;
+    if (qr_code_enabled && userData.subscription_tier === 'free' && userData.qr_codes_generated >= 5) {
+      return res.status(403).json({ 
+        error: 'QR code limit reached',
+        message: 'Free users can generate up to 5 QR codes. Upgrade to Pro for unlimited QR codes.'
+      });
     }
 
     // Determine if watermark should be applied
@@ -243,6 +252,16 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
           },
           width: 300
         });
+        
+        // Increment QR code counter for free users
+        if (userData.subscription_tier === 'free') {
+          await supabaseAdmin
+            .from('users')
+            .update({ 
+              qr_codes_generated: userData.qr_codes_generated + 1 
+            })
+            .eq('id', req.user.id);
+        }
       } catch (qrError) {
         console.error('Failed to generate QR code:', qrError);
         // Continue without QR code
@@ -264,6 +283,13 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
       watermark_info: {
         has_watermark: shouldApplyWatermark,
         remaining_free_uploads: Math.max(0, userData.free_uploads_without_watermark - 1),
+        is_pro_user: userData.subscription_tier === 'pro'
+      },
+      qr_info: {
+        qr_codes_generated: userData.qr_codes_generated + (qr_code_enabled ? 1 : 0),
+        qr_codes_remaining: userData.subscription_tier === 'free' 
+          ? Math.max(0, 5 - (userData.qr_codes_generated + (qr_code_enabled ? 1 : 0)))
+          : null, // Pro users have unlimited
         is_pro_user: userData.subscription_tier === 'pro'
       }
     });
