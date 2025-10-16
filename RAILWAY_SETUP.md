@@ -72,7 +72,7 @@ Once Railway is deployed, you need to configure Dodo Payments webhooks:
 
 The backend will expose these endpoints:
 
-- `POST /.netlify/functions/dodo-webhook` - Webhook handler for payment events
+- `POST /api/webhook/dodo` - Webhook handler for payment events
 - More endpoints can be added as needed
 
 ## Monitoring
