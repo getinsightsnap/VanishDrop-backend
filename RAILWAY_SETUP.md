@@ -57,10 +57,20 @@ Once Railway is deployed, you need to configure Dodo Payments webhooks:
    - Set URL to: `https://your-app.railway.app/api/webhook/dodo`
    - Select events to listen for:
      - `payment.succeeded`
+     - `payment.failed`
+     - `payment.cancelled`
      - `subscription.active`
      - `subscription.activated`
+     - `subscription.renewed`
      - `subscription.cancelled`
      - `subscription.expired`
+     - `subscription.paused`
+     - `subscription.on_hold`
+     - `subscription.suspended`
+     - `subscription.trial_started`
+     - `subscription.trial_ended`
+     - `invoice.payment_succeeded`
+     - `invoice.payment_failed`
    - Save the webhook
 
 3. **Test Webhook**
