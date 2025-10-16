@@ -160,6 +160,32 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
       password_hash = await bcrypt.hash(password, saltRounds);
     }
 
+    // Check user's watermark status
+    const { data: userData, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('subscription_tier, free_uploads_without_watermark')
+      .eq('id', req.user.id)
+      .single();
+
+    if (userError) {
+      console.error('Error fetching user data:', userError);
+      throw new Error('Failed to fetch user data');
+    }
+
+    // Determine if watermark should be applied
+    const shouldApplyWatermark = userData.subscription_tier === 'free' && 
+                                userData.free_uploads_without_watermark <= 0;
+
+    // Decrement free uploads counter for free users (only if they have remaining free uploads)
+    if (userData.subscription_tier === 'free' && userData.free_uploads_without_watermark > 0) {
+      await supabaseAdmin
+        .from('users')
+        .update({ 
+          free_uploads_without_watermark: userData.free_uploads_without_watermark - 1 
+        })
+        .eq('id', req.user.id);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('share_links')
       .insert({
@@ -170,7 +196,8 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
         max_opens,
         password_hash,
         require_otp,
-        qr_code_enabled
+        qr_code_enabled,
+        has_watermark: shouldApplyWatermark
       })
       .select()
       .single();
@@ -229,7 +256,12 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
       },
       url: shareUrl,
       email_sent: !!recipient_email,
-      qr_code: qrCodeDataURL
+      qr_code: qrCodeDataURL,
+      watermark_info: {
+        has_watermark: shouldApplyWatermark,
+        remaining_free_uploads: Math.max(0, userData.free_uploads_without_watermark - 1),
+        is_pro_user: userData.subscription_tier === 'pro'
+      }
     });
   } catch (error) {
     console.error('=== SHARE LINK CREATION ERROR ===');
