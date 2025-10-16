@@ -54,7 +54,7 @@ Once Railway is deployed, you need to configure Dodo Payments webhooks:
    - Go to Dodo Payments Dashboard
    - Navigate to **Developer** → **Webhooks**
    - Click **Add Webhook Endpoint**
-   - Set URL to: `https://your-app.railway.app/.netlify/functions/dodo-webhook`
+   - Set URL to: `https://your-app.railway.app/api/webhook/dodo`
    - Select events to listen for:
      - `payment.succeeded`
      - `subscription.active`
