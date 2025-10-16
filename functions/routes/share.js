@@ -121,6 +121,13 @@ router.post('/anonymous', validateShareLink, async (req, res) => {
 // Create share link - AUTHENTICATED USERS
 router.post('/', authMiddleware, validateShareLink, async (req, res) => {
   try {
+    console.log('=== SHARE LINK CREATION START ===');
+    console.log('Request body:', req.body);
+    console.log('User:', req.user ? {
+      id: req.user.id,
+      email: req.user.email
+    } : 'No user');
+
     const {
       file_id,
       expires_at,
@@ -225,6 +232,13 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
       qr_code: qrCodeDataURL
     });
   } catch (error) {
+    console.error('=== SHARE LINK CREATION ERROR ===');
+    console.error('Error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Request body:', req.body);
+    console.error('User:', req.user?.id);
+    
     logger.error('Error creating share link:', error);
     res.status(500).json({ error: 'Failed to create share link' });
   }
