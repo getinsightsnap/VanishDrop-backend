@@ -598,6 +598,24 @@ router.get('/user/links', authMiddleware, async (req, res) => {
   }
 });
 
+// Get user's share link history
+router.get('/user/history', authMiddleware, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('share_link_history')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json({ history: data });
+  } catch (error) {
+    console.error('Error fetching share link history:', error);
+    res.status(500).json({ error: 'Failed to fetch share link history' });
+  }
+});
+
 // Delete share link
 router.delete('/:linkId', authMiddleware, validateUUID, async (req, res) => {
   try {
