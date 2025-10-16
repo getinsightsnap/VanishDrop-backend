@@ -23,6 +23,28 @@ router.get('/profile', authMiddleware, async (req, res) => {
   }
 });
 
+// Get subscription status
+router.get('/subscription', authMiddleware, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('subscription_tier, dodo_session_id, upgraded_at')
+      .eq('id', req.user.id)
+      .single();
+
+    if (error) throw error;
+
+    res.json({ 
+      subscription_tier: data.subscription_tier,
+      dodo_session_id: data.dodo_session_id,
+      upgraded_at: data.upgraded_at
+    });
+  } catch (error) {
+    console.error('Error fetching subscription status:', error);
+    res.status(500).json({ error: 'Failed to fetch subscription status' });
+  }
+});
+
 // Update subscription tier
 router.patch('/subscription', authMiddleware, validateSubscriptionUpdate, async (req, res) => {
   try {
