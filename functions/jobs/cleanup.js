@@ -72,14 +72,31 @@ export const cleanupExpiredFiles = async () => {
   }
 };
 
-// Cleanup expired share links (optional - they should be deleted with files via cascade)
+// Move expired share links to history table instead of deleting them
 export const cleanupExpiredShareLinks = async () => {
   try {
-    console.log('🧹 Starting cleanup of expired share links...');
+    console.log('🧹 Moving expired share links to history...');
 
     const { data: expiredLinks, error: fetchError } = await supabaseAdmin
       .from('share_links')
-      .select('id, share_token')
+      .select(`
+        id,
+        user_id,
+        share_token,
+        expires_at,
+        max_opens,
+        current_opens,
+        password_hash,
+        require_otp,
+        qr_code_enabled,
+        has_watermark,
+        created_at,
+        uploaded_files (
+          filename,
+          file_size,
+          file_type
+        )
+      `)
       .lt('expires_at', new Date().toISOString());
 
     if (fetchError) {
@@ -88,26 +105,69 @@ export const cleanupExpiredShareLinks = async () => {
     }
 
     if (!expiredLinks || expiredLinks.length === 0) {
-      console.log('✅ No expired share links to clean up');
+      console.log('✅ No expired share links found');
       return;
     }
 
-    console.log(`📦 Found ${expiredLinks.length} expired share links to delete`);
+    console.log(`📦 Found ${expiredLinks.length} expired share links to archive`);
 
-    const linkIds = expiredLinks.map(link => link.id);
+    // Move each expired link to history
+    let archivedCount = 0;
+    let errorCount = 0;
 
-    const { error: deleteError } = await supabaseAdmin
-      .from('share_links')
-      .delete()
-      .in('id', linkIds);
+    for (const link of expiredLinks) {
+      try {
+        // Insert into history table
+        const { error: insertError } = await supabaseAdmin
+          .from('share_link_history')
+          .insert({
+            original_share_link_id: link.id,
+            user_id: link.user_id,
+            file_name: link.uploaded_files?.filename || 'Unknown file',
+            file_size: link.uploaded_files?.file_size || 0,
+            file_type: link.uploaded_files?.file_type || 'unknown',
+            share_token: link.share_token,
+            expires_at: link.expires_at,
+            max_opens: link.max_opens,
+            final_opens: link.current_opens || 0,
+            had_password: !!link.password_hash,
+            had_otp: link.require_otp || false,
+            had_qr_code: link.qr_code_enabled || false,
+            had_watermark: link.has_watermark || false,
+            created_at: link.created_at,
+            archived_at: new Date().toISOString(),
+            status: 'expired'
+          });
 
-    if (deleteError) {
-      console.error('Error deleting expired links:', deleteError);
-    } else {
-      console.log(`✅ Deleted ${expiredLinks.length} expired share links`);
+        if (insertError) {
+          console.error(`Error archiving link ${link.id}:`, insertError);
+          errorCount++;
+          continue;
+        }
+
+        // Delete the original share link
+        const { error: deleteError } = await supabaseAdmin
+          .from('share_links')
+          .delete()
+          .eq('id', link.id);
+
+        if (deleteError) {
+          console.error(`Error deleting original link ${link.id}:`, deleteError);
+          errorCount++;
+        } else {
+          archivedCount++;
+        }
+      } catch (error) {
+        console.error(`Error processing link ${link.id}:`, error);
+        errorCount++;
+      }
     }
+
+    console.log(`✅ Archive completed: ${archivedCount} links archived, ${errorCount} errors`);
+    logger.info(`✅ Share links cleanup completed: ${archivedCount} links moved to history, ${errorCount} errors`);
   } catch (error) {
-    console.error('Error in share link cleanup job:', error);
+    console.error('Error in share links cleanup:', error);
+    logger.error('Share links cleanup failed:', error);
   }
 };
 
