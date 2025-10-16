@@ -31,6 +31,14 @@ router.post('/dodo', async (req, res) => {
       url: req.url
     });
 
+    // TODO: Add webhook signature verification if Dodo Payments requires it
+    // const webhookSignature = req.headers['x-dodo-signature'];
+    // const apiKey = process.env.DODO_PAYMENTS_API_KEY;
+    // if (apiKey && webhookSignature) {
+    //   // Verify webhook signature
+    //   // Implementation depends on Dodo Payments documentation
+    // }
+
     // Handle different webhook events
     const eventType = req.body.event_type || req.body.type;
     
