@@ -105,6 +105,11 @@ router.post('/dodo/create-checkout', async (req, res) => {
       product_id: productId,
       quantity: 1,
       return_url: redirectUrl || 'https://vanishdrop.com/payment/success',
+      customization: {
+        feature_flags: {
+          allow_discount_code: true // Enable coupon/discount code field on checkout
+        }
+      },
       metadata: {
         user_id: userId,
         source: 'vanishdrop_webapp'
