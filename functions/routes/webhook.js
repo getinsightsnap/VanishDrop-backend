@@ -94,22 +94,23 @@ router.post('/dodo/create-checkout', async (req, res) => {
     
     logger.info('Creating subscription with SDK', { userId, userEmail, hasBillingInfo: !!billingInfo });
     
-    // Create subscription with payment link using Dodo Payments SDK
-    const subscriptionPayload = {
-      billing: billing,
+    // Create checkout session with discount code support using Dodo Payments SDK
+    const checkoutPayload = {
+      product_cart: [
+        { 
+          product_id: productId, 
+          quantity: 1 
+        }
+      ],
+      feature_flags: {
+        allow_discount_code: true // Enable coupon/discount code field on checkout
+      },
+      return_url: redirectUrl || 'https://vanishdrop.com/payment/success',
       customer: {
         email: userEmail,
         name: userEmail.split('@')[0], // Extract name from email
       },
-      payment_link: true, // Generate payment link for subscription
-      product_id: productId,
-      quantity: 1,
-      return_url: redirectUrl || 'https://vanishdrop.com/payment/success',
-      customization: {
-        feature_flags: {
-          allow_discount_code: true // Enable coupon/discount code field on checkout
-        }
-      },
+      billing: billing,
       metadata: {
         user_id: userId,
         source: 'vanishdrop_webapp'
@@ -118,23 +119,23 @@ router.post('/dodo/create-checkout', async (req, res) => {
     
     // Add discount code if provided
     if (discountCode) {
-      subscriptionPayload.discount_code = discountCode;
+      checkoutPayload.discount_code = discountCode;
       logger.info('Applying discount code', { discountCode });
     }
     
-    const subscriptionResponse = await dodoClient.subscriptions.create(subscriptionPayload);
+    const checkoutResponse = await dodoClient.checkoutSessions.create(checkoutPayload);
     
-    logger.info('✅ Subscription payment link created', { 
-      paymentLink: subscriptionResponse.payment_link,
-      subscriptionId: subscriptionResponse.subscription_id,
+    logger.info('✅ Checkout session created', { 
+      checkoutUrl: checkoutResponse.checkout_url,
+      sessionId: checkoutResponse.session_id,
       userId, 
       userEmail 
     });
     
     res.json({
       success: true,
-      checkoutUrl: subscriptionResponse.payment_link,
-      subscriptionId: subscriptionResponse.subscription_id
+      checkoutUrl: checkoutResponse.checkout_url,
+      sessionId: checkoutResponse.session_id
     });
     
   } catch (error) {
