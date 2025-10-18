@@ -68,13 +68,55 @@ router.post('/dodo', async (req, res) => {
       url: req.url
     });
 
-    // TODO: Add webhook signature verification if Dodo Payments requires it
-    // const webhookSignature = req.headers['x-dodo-signature'];
-    // const apiKey = process.env.DODO_PAYMENTS_API_KEY;
-    // if (apiKey && webhookSignature) {
-    //   // Verify webhook signature
-    //   // Implementation depends on Dodo Payments documentation
-    // }
+    // Verify webhook signature for security
+    const webhookSignature = req.headers['webhook-signature'] || req.headers['x-dodo-signature'];
+    const webhookId = req.headers['webhook-id'];
+    const webhookTimestamp = req.headers['webhook-timestamp'];
+    const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+    
+    if (webhookSecret && webhookSignature && webhookId && webhookTimestamp) {
+      try {
+        // Import crypto for signature verification
+        const crypto = await import('crypto');
+        
+        // Create the signature string
+        const payload = JSON.stringify(req.body);
+        const signatureString = `${webhookId}.${webhookTimestamp}.${payload}`;
+        
+        // Compute HMAC SHA256 signature
+        const computedSignature = crypto
+          .createHmac('sha256', webhookSecret)
+          .update(signatureString)
+          .digest('hex');
+        
+        // Compare signatures
+        if (computedSignature !== webhookSignature) {
+          console.error('Webhook signature verification failed');
+          logger.error('Webhook signature verification failed', {
+            computed: computedSignature,
+            received: webhookSignature,
+            webhookId,
+            webhookTimestamp
+          });
+          return res.status(401).json({ error: 'Invalid webhook signature' });
+        }
+        
+        console.log('✅ Webhook signature verified successfully');
+        logger.info('Webhook signature verified successfully');
+      } catch (signatureError) {
+        console.error('Error verifying webhook signature:', signatureError);
+        logger.error('Error verifying webhook signature', { error: signatureError.message });
+        return res.status(401).json({ error: 'Webhook signature verification failed' });
+      }
+    } else {
+      console.warn('Webhook signature verification skipped - missing required headers or secret');
+      logger.warn('Webhook signature verification skipped', {
+        hasSecret: !!webhookSecret,
+        hasSignature: !!webhookSignature,
+        hasId: !!webhookId,
+        hasTimestamp: !!webhookTimestamp
+      });
+    }
 
     // Handle different webhook events
     // Dodo Payments webhook structure can vary, check multiple possible locations
