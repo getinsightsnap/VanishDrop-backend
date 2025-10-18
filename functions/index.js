@@ -7,7 +7,7 @@ import shareRoutes from './routes/share.js';
 import adminRoutes from './routes/admin.js';
 import analyticsRoutes from './routes/analytics.js';
 import webhookRoutes from './routes/webhook.js';
-import { generalLimiter } from './middleware/rateLimiter.js';
+import { generalLimiter, checkoutLimiter } from './middleware/rateLimiter.js';
 import { initializeCronJobs } from './jobs/cleanup.js';
 import logger from './utils/logger.js';
 import { supabaseAdmin } from '../config/supabase.js';
@@ -207,7 +207,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/share', shareRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', analyticsRoutes);
-app.use('/api/webhook', webhookRoutes);
+app.use('/api/webhook', checkoutLimiter, webhookRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
