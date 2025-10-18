@@ -4,9 +4,20 @@ import rateLimit from 'express-rate-limit';
 export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
+  message: {
+    error: 'Too many requests',
+    message: 'Too many requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  },
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many requests',
+      message: 'Too many requests from this IP, please try again later.',
+      retryAfter: '15 minutes'
+    });
+  }
 });
 
 // Stricter rate limiter for authentication endpoints
@@ -46,11 +57,32 @@ export const passwordLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Rate limiter for checkout endpoints (more lenient for testing)
+export const checkoutLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200, // Limit each IP to 200 checkout requests per 15 minutes
+  message: {
+    error: 'Too many checkout requests',
+    message: 'Too many checkout requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many checkout requests',
+      message: 'Too many checkout requests from this IP, please try again later.',
+      retryAfter: '15 minutes'
+    });
+  }
+});
+
 export default {
   generalLimiter,
   authLimiter,
   uploadLimiter,
   shareLimiter,
   passwordLimiter,
+  checkoutLimiter,
 };
 
