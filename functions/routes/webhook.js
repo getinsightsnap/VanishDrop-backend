@@ -66,12 +66,17 @@ router.post('/dodo/create-checkout', async (req, res) => {
     
     logger.info('Creating checkout session', { userId, userEmail });
     
-    // Create checkout session with Dodo Payments API
+    // Create checkout session with Dodo Payments API - using correct format
     const checkoutData = {
-      product_id: 'pdt_KpH25grhUybj56ZBcu1hd',
-      quantity: 1,
+      product_cart: [
+        {
+          product_id: 'pdt_KpH25grhUybj56ZBcu1hd',
+          quantity: 1
+        }
+      ],
       customer_email: userEmail,
-      redirect_url: redirectUrl || 'https://vanishdrop.com/payment/success',
+      success_url: redirectUrl || 'https://vanishdrop.com/payment/success',
+      cancel_url: 'https://vanishdrop.com/pricing',
       metadata: {
         user_id: userId,
         source: 'vanishdrop_webapp'
@@ -81,10 +86,10 @@ router.post('/dodo/create-checkout', async (req, res) => {
     // Call Dodo Payments API to create checkout session
     logger.info('Calling Dodo Payments API', { 
       checkoutData,
-      apiUrl: 'https://api.dodopayments.com/v1/checkout'
+      apiUrl: 'https://api.dodopayments.com/checkouts'
     });
     
-    const dodoResponse = await fetch('https://api.dodopayments.com/v1/checkout', {
+    const dodoResponse = await fetch('https://api.dodopayments.com/checkouts', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.DODO_PAYMENTS_API_KEY}`,
