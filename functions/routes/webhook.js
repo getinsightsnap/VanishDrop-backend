@@ -15,14 +15,18 @@ const dodoClient = new DodoPayments({
 const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
 let webhookVerifier = null;
 
-if (webhookSecret && webhookSecret !== 'your_dodo_payments_webhook_secret_here') {
+// Only initialize webhook verifier if we have a valid secret
+if (webhookSecret && 
+    webhookSecret !== 'your_dodo_payments_webhook_secret_here' && 
+    webhookSecret.startsWith('whsec_')) {
   try {
     webhookVerifier = new Webhook(webhookSecret);
+    console.log('✅ Webhook verifier initialized successfully');
   } catch (error) {
     console.warn('⚠️ Invalid webhook secret format, webhook verification disabled:', error.message);
   }
 } else {
-  console.warn('⚠️ No webhook secret configured, webhook verification disabled');
+  console.warn('⚠️ No valid webhook secret configured (must start with whsec_), webhook verification disabled');
 }
 
 // Health check endpoint
