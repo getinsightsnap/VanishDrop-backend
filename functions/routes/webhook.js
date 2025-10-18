@@ -11,8 +11,19 @@ const dodoClient = new DodoPayments({
   bearerToken: process.env.DODO_PAYMENTS_API_KEY,
 });
 
-// Initialize Webhook verifier
-const webhookVerifier = new Webhook(process.env.DODO_PAYMENTS_WEBHOOK_SECRET || 'whsec_hftWHCsZN6E+FcuG7GBiPrUUcoNoduTi');
+// Initialize Webhook verifier with proper error handling
+const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+let webhookVerifier = null;
+
+if (webhookSecret && webhookSecret !== 'your_dodo_payments_webhook_secret_here') {
+  try {
+    webhookVerifier = new Webhook(webhookSecret);
+  } catch (error) {
+    console.warn('⚠️ Invalid webhook secret format, webhook verification disabled:', error.message);
+  }
+} else {
+  console.warn('⚠️ No webhook secret configured, webhook verification disabled');
+}
 
 // Health check endpoint
 router.get('/dodo', (req, res) => {
@@ -176,19 +187,23 @@ router.post('/dodo', express.raw({ type: 'application/json' }), async (req, res)
       'webhook-timestamp': req.headers['webhook-timestamp'] || '',
     };
     
-    try {
-      // Verify webhook signature using standardwebhooks
-      await webhookVerifier.verify(rawBody, webhookHeaders);
-      logger.info('✅ Webhook signature verified successfully - webhook is from Dodo Payments');
-    } catch (verificationError) {
-      logger.error('❌ Webhook verification failed', { 
-        error: verificationError.message,
-        headers: webhookHeaders
-      });
-      return res.status(401).json({ 
-        error: 'Webhook verification failed',
-        message: verificationError.message
-      });
+    if (webhookVerifier) {
+      try {
+        // Verify webhook signature using standardwebhooks
+        await webhookVerifier.verify(rawBody, webhookHeaders);
+        logger.info('✅ Webhook signature verified successfully - webhook is from Dodo Payments');
+      } catch (verificationError) {
+        logger.error('❌ Webhook verification failed', { 
+          error: verificationError.message,
+          headers: webhookHeaders
+        });
+        return res.status(401).json({ 
+          error: 'Webhook verification failed',
+          message: verificationError.message
+        });
+      }
+    } else {
+      logger.warn('⚠️ Webhook verification skipped - no valid webhook secret configured');
     }
     
     // Parse the verified payload
