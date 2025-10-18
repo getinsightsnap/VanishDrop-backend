@@ -126,15 +126,25 @@ router.post('/dodo/create-checkout', async (req, res) => {
     const checkoutSession = await dodoResponse.json();
     
     logger.info('Checkout session created successfully', { 
-      sessionId: checkoutSession.id, 
+      fullResponse: checkoutSession,
+      sessionId: checkoutSession.id || checkoutSession.session_id, 
       userId, 
       userEmail 
     });
     
+    // Dodo Payments may return different field names, so we need to check
+    const checkoutUrl = checkoutSession.url || checkoutSession.checkout_url || checkoutSession.payment_url;
+    const sessionId = checkoutSession.id || checkoutSession.session_id;
+    
+    if (!checkoutUrl) {
+      logger.error('No checkout URL in response', { checkoutSession });
+      throw new Error('No checkout URL received from Dodo Payments');
+    }
+    
     res.json({
       success: true,
-      checkoutUrl: checkoutSession.url,
-      sessionId: checkoutSession.id
+      checkoutUrl: checkoutUrl,
+      sessionId: sessionId
     });
     
   } catch (error) {
