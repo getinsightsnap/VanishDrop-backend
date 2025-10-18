@@ -50,6 +50,59 @@ router.post('/dodo/debug', async (req, res) => {
   }
 });
 
+// Debug endpoint to check if user exists in database
+router.get('/dodo/check-user/:email', async (req, res) => {
+  try {
+    const email = req.params.email;
+    console.log('Checking user existence for email:', email);
+    
+    // Check with case-insensitive search
+    const { data: userData, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('id, email, subscription_tier, created_at')
+      .ilike('email', email)
+      .single();
+      
+    if (userError || !userData) {
+      // Try exact match
+      const { data: exactUserData, error: exactUserError } = await supabaseAdmin
+        .from('users')
+        .select('id, email, subscription_tier, created_at')
+        .eq('email', email)
+        .single();
+        
+      if (exactUserError || !exactUserData) {
+        return res.json({
+          found: false,
+          email: email,
+          caseInsensitiveError: userError?.message,
+          exactMatchError: exactUserError?.message,
+          message: 'User not found in database'
+        });
+      }
+      
+      return res.json({
+        found: true,
+        user: exactUserData,
+        matchType: 'exact'
+      });
+    }
+    
+    res.json({
+      found: true,
+      user: userData,
+      matchType: 'case-insensitive'
+    });
+    
+  } catch (error) {
+    console.error('Debug user check error:', error);
+    res.status(500).json({ 
+      error: 'User check failed', 
+      message: error.message 
+    });
+  }
+});
+
 // Dodo Payments Webhook Handler
 // Docs: https://docs.dodopayments.com/developer-resources/webhooks
 router.post('/dodo', async (req, res) => {
@@ -69,10 +122,18 @@ router.post('/dodo', async (req, res) => {
     });
 
     // Verify webhook signature for security
-    const webhookSignature = req.headers['webhook-signature'] || req.headers['x-dodo-signature'];
-    const webhookId = req.headers['webhook-id'];
-    const webhookTimestamp = req.headers['webhook-timestamp'];
+    const webhookSignature = req.headers['webhook-signature'] || req.headers['x-dodo-signature'] || req.headers['dodo-signature'];
+    const webhookId = req.headers['webhook-id'] || req.headers['x-webhook-id'];
+    const webhookTimestamp = req.headers['webhook-timestamp'] || req.headers['x-webhook-timestamp'];
     const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+    
+    console.log('Webhook signature verification headers:', {
+      signature: webhookSignature,
+      id: webhookId,
+      timestamp: webhookTimestamp,
+      hasSecret: !!webhookSecret,
+      allHeaders: Object.keys(req.headers)
+    });
     
     if (webhookSecret && webhookSignature && webhookId && webhookTimestamp) {
       try {
@@ -167,8 +228,8 @@ router.post('/dodo', async (req, res) => {
               .single();
               
             if (userError || !userData) {
-              console.error('User not found by email:', customerEmail, 'Error:', userError);
-              logger.error('User not found by email', { email: customerEmail, error: userError });
+              console.error('User not found by email (case-insensitive):', customerEmail, 'Error:', userError);
+              logger.error('User not found by email (case-insensitive)', { email: customerEmail, error: userError });
               
               // Try exact match as fallback
               const { data: exactUserData, error: exactUserError } = await supabaseAdmin
@@ -179,10 +240,26 @@ router.post('/dodo', async (req, res) => {
                 
               if (exactUserError || !exactUserData) {
                 console.error('User not found with exact email match either:', customerEmail);
-                return res.status(400).json({ 
-                  error: 'User not found by email', 
-                  email: customerEmail,
-                  details: 'No user found with this email address'
+                logger.error('User not found by email after both case-insensitive and exact match attempts', { 
+                  email: customerEmail, 
+                  caseInsensitiveError: userError,
+                  exactMatchError: exactUserError 
+                });
+                
+                // User not found in database - this should be handled by the database trigger
+                // Return success to prevent webhook retries, but log the issue
+                console.log('⚠️  User not found in database - check if database trigger is working');
+                logger.warn('User not found in database for webhook', { 
+                  email: customerEmail, 
+                  eventType,
+                  customerId,
+                  suggestion: 'Check if database trigger is working or user needs to be created manually'
+                });
+                
+                return res.json({ 
+                  success: true, 
+                  message: `Webhook processed but user not found: ${customerEmail}`,
+                  warning: 'User not found in database - check database trigger'
                 });
               }
               
