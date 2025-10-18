@@ -13,12 +13,54 @@ router.get('/dodo', (req, res) => {
   });
 });
 
+// Simple API key test
+router.get('/dodo/apikey', (req, res) => {
+  res.json({
+    hasApiKey: !!process.env.DODO_PAYMENTS_API_KEY,
+    apiKeyLength: process.env.DODO_PAYMENTS_API_KEY?.length,
+    apiKeyPreview: process.env.DODO_PAYMENTS_API_KEY?.substring(0, 10) + '...'
+  });
+});
+
+// Test Dodo Payments API key
+router.get('/dodo/test', async (req, res) => {
+  try {
+    const testResponse = await fetch('https://api.dodopayments.com/v1/products', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${process.env.DODO_PAYMENTS_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    res.json({
+      status: testResponse.status,
+      ok: testResponse.ok,
+      hasApiKey: !!process.env.DODO_PAYMENTS_API_KEY,
+      apiKeyLength: process.env.DODO_PAYMENTS_API_KEY?.length
+    });
+  } catch (error) {
+    res.json({
+      error: error.message,
+      hasApiKey: !!process.env.DODO_PAYMENTS_API_KEY,
+      apiKeyLength: process.env.DODO_PAYMENTS_API_KEY?.length
+    });
+  }
+});
+
 // Create Dodo Payments checkout session with proper metadata
 router.post('/dodo/create-checkout', async (req, res) => {
   try {
+    logger.info('Checkout endpoint hit', { 
+      body: req.body, 
+      hasApiKey: !!process.env.DODO_PAYMENTS_API_KEY,
+      apiKeyLength: process.env.DODO_PAYMENTS_API_KEY?.length 
+    });
+    
     const { userId, userEmail, redirectUrl } = req.body;
     
     if (!userId || !userEmail) {
+      logger.error('Missing userId or userEmail', { userId, userEmail });
       return res.status(400).json({ error: 'userId and userEmail are required' });
     }
     
@@ -37,7 +79,12 @@ router.post('/dodo/create-checkout', async (req, res) => {
     };
     
     // Call Dodo Payments API to create checkout session
-    const dodoResponse = await fetch('https://api.dodopayments.com/v1/checkout/sessions', {
+    logger.info('Calling Dodo Payments API', { 
+      checkoutData,
+      apiUrl: 'https://api.dodopayments.com/v1/checkout'
+    });
+    
+    const dodoResponse = await fetch('https://api.dodopayments.com/v1/checkout', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.DODO_PAYMENTS_API_KEY}`,
@@ -46,10 +93,29 @@ router.post('/dodo/create-checkout', async (req, res) => {
       body: JSON.stringify(checkoutData)
     });
     
+    logger.info('Dodo Payments API response received', { 
+      status: dodoResponse.status,
+      statusText: dodoResponse.statusText,
+      ok: dodoResponse.ok
+    });
+    
     if (!dodoResponse.ok) {
-      const errorData = await dodoResponse.json();
-      logger.error('Dodo Payments API error', { error: errorData, userId, userEmail });
-      throw new Error(`Dodo Payments API error: ${errorData.message || 'Unknown error'}`);
+      const errorText = await dodoResponse.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { raw: errorText };
+      }
+      logger.error('Dodo Payments API error', { 
+        status: dodoResponse.status,
+        statusText: dodoResponse.statusText,
+        error: errorData, 
+        userId, 
+        userEmail,
+        headers: Object.fromEntries(dodoResponse.headers.entries())
+      });
+      throw new Error(`Dodo Payments API error (${dodoResponse.status}): ${errorData.message || errorData.error || errorText || 'Unknown error'}`);
     }
     
     const checkoutSession = await dodoResponse.json();
@@ -68,13 +134,17 @@ router.post('/dodo/create-checkout', async (req, res) => {
     
   } catch (error) {
     logger.error('Failed to create checkout session', { 
-      error: error.message, 
-      body: req.body 
+      error: error.message,
+      errorStack: error.stack,
+      errorName: error.name,
+      body: req.body,
+      hasApiKey: !!process.env.DODO_PAYMENTS_API_KEY
     });
     
     res.status(500).json({ 
       error: 'Failed to create checkout session', 
-      message: error.message 
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
