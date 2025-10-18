@@ -13,6 +13,43 @@ router.get('/dodo', (req, res) => {
   });
 });
 
+// Debug endpoint to test webhook processing with sample data
+router.post('/dodo/debug', async (req, res) => {
+  try {
+    console.log('=== DEBUG WEBHOOK TEST ===');
+    console.log('Test payload:', req.body);
+    
+    // Simulate a payment.succeeded event
+    const testPayload = {
+      type: 'payment.succeeded',
+      data: {
+        customer: {
+          email: req.body.testEmail || 'test@example.com',
+          customer_id: 'test_customer_123'
+        },
+        metadata: {
+          user_id: req.body.testUserId || null
+        }
+      }
+    };
+    
+    console.log('Simulating webhook with payload:', testPayload);
+    
+    // Process the test payload
+    req.body = testPayload;
+    
+    // Call the main webhook handler
+    await router.handle(req, res);
+    
+  } catch (error) {
+    console.error('Debug webhook test error:', error);
+    res.status(500).json({ 
+      error: 'Debug test failed', 
+      message: error.message 
+    });
+  }
+});
+
 // Dodo Payments Webhook Handler
 // Docs: https://docs.dodopayments.com/developer-resources/webhooks
 router.post('/dodo', async (req, res) => {
@@ -40,10 +77,18 @@ router.post('/dodo', async (req, res) => {
     // }
 
     // Handle different webhook events
-    const eventType = req.body.type; // Dodo Payments uses 'type' not 'event_type'
+    // Dodo Payments webhook structure can vary, check multiple possible locations
+    const eventType = req.body.type || req.body.event_type || req.body.event?.type;
     
     console.log('Event type:', eventType);
     console.log('Full payload structure:', JSON.stringify(req.body, null, 2));
+    console.log('Available keys in body:', Object.keys(req.body));
+    
+    if (!eventType) {
+      console.error('No event type found in webhook payload');
+      logger.error('No event type found in webhook payload', { body: req.body });
+      return res.status(400).json({ error: 'No event type found in payload' });
+    }
     
     switch (eventType) {
       case 'payment.succeeded':
@@ -51,9 +96,11 @@ router.post('/dodo', async (req, res) => {
       case 'subscription.activated':
       case 'subscription.renewed':
         // Handle successful payments and subscription activation/renewal
-        const customerId = req.body.data?.customer?.customer_id;
-        const customerEmail = req.body.data?.customer?.email;
-        const metadata = req.body.data?.metadata || {};
+        // Check multiple possible locations for customer data
+        const customerData = req.body.data?.customer || req.body.customer || req.body.data;
+        const customerId = customerData?.customer_id || customerData?.id;
+        const customerEmail = customerData?.email;
+        const metadata = req.body.data?.metadata || req.body.metadata || {};
         const userId = metadata.user_id;
         
         console.log('Processing payment success:', { 
@@ -69,44 +116,95 @@ router.post('/dodo', async (req, res) => {
         if (!userId && customerEmail) {
           console.log('No user_id in metadata, trying to find user by email:', customerEmail);
           
-          // Find user by email
-          const { data: userData, error: userError } = await supabaseAdmin
-            .from('users')
-            .select('id')
-            .eq('email', customerEmail)
-            .single();
+          try {
+            // Find user by email (case-insensitive)
+            const { data: userData, error: userError } = await supabaseAdmin
+              .from('users')
+              .select('id, email')
+              .ilike('email', customerEmail) // Case-insensitive search
+              .single();
+              
+            if (userError || !userData) {
+              console.error('User not found by email:', customerEmail, 'Error:', userError);
+              logger.error('User not found by email', { email: customerEmail, error: userError });
+              
+              // Try exact match as fallback
+              const { data: exactUserData, error: exactUserError } = await supabaseAdmin
+                .from('users')
+                .select('id, email')
+                .eq('email', customerEmail)
+                .single();
+                
+              if (exactUserError || !exactUserData) {
+                console.error('User not found with exact email match either:', customerEmail);
+                return res.status(400).json({ 
+                  error: 'User not found by email', 
+                  email: customerEmail,
+                  details: 'No user found with this email address'
+                });
+              }
+              
+              // Use exact match result
+              const foundUserId = exactUserData.id;
+              console.log('Found user with exact email match:', foundUserId);
+              
+              // Update user subscription to pro
+              const { error: updateError } = await supabaseAdmin
+                .from('users')
+                .update({
+                  subscription_tier: 'pro',
+                  upgraded_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', foundUserId);
+
+              if (updateError) {
+                console.error('Error updating user subscription:', updateError);
+                logger.error('Failed to update user subscription', { error: updateError, userId: foundUserId });
+                throw updateError;
+              }
+
+              console.log(`✅ Successfully upgraded user ${foundUserId} to Pro (${eventType})`);
+              logger.info(`User upgraded to Pro`, { userId: foundUserId, eventType });
+              
+              res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
+              return;
+            }
             
-          if (userError || !userData) {
-            console.error('User not found by email:', customerEmail);
-            logger.error('User not found by email', { email: customerEmail, error: userError });
-            return res.status(400).json({ error: 'User not found by email' });
-          }
-          
-          // Use the found user ID
-          const foundUserId = userData.id;
-          console.log('Found user by email:', foundUserId);
-          
-          // Update user subscription to pro
-          const { error: updateError } = await supabaseAdmin
-            .from('users')
-            .update({
-              subscription_tier: 'pro',
-              upgraded_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', foundUserId);
+            // Use the found user ID (case-insensitive match worked)
+            const foundUserId = userData.id;
+            console.log('Found user by email (case-insensitive):', foundUserId);
+            
+            // Update user subscription to pro
+            const { error: updateError } = await supabaseAdmin
+              .from('users')
+              .update({
+                subscription_tier: 'pro',
+                upgraded_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', foundUserId);
 
-          if (updateError) {
-            console.error('Error updating user subscription:', updateError);
-            logger.error('Failed to update user subscription', { error: updateError, userId: foundUserId });
-            throw updateError;
-          }
+            if (updateError) {
+              console.error('Error updating user subscription:', updateError);
+              logger.error('Failed to update user subscription', { error: updateError, userId: foundUserId });
+              throw updateError;
+            }
 
-          console.log(`✅ Successfully upgraded user ${foundUserId} to Pro (${eventType})`);
-          logger.info(`User upgraded to Pro`, { userId: foundUserId, eventType });
-          
-          res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
-          return;
+            console.log(`✅ Successfully upgraded user ${foundUserId} to Pro (${eventType})`);
+            logger.info(`User upgraded to Pro`, { userId: foundUserId, eventType });
+            
+            res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
+            return;
+            
+          } catch (emailLookupError) {
+            console.error('Error during email lookup:', emailLookupError);
+            logger.error('Email lookup failed', { error: emailLookupError, email: customerEmail });
+            return res.status(500).json({ 
+              error: 'Failed to lookup user by email', 
+              details: emailLookupError.message 
+            });
+          }
         }
         
         if (!userId) {
