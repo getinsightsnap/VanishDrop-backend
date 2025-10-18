@@ -76,16 +76,32 @@ router.post('/dodo/create-checkout', async (req, res) => {
     
     logger.info('Creating subscription checkout session', { userId, userEmail });
     
-    // Use official SDK pattern for subscription checkout
+    // For subscriptions, use SDK with payment_link: true (following official pattern)
     const productId = 'pdt_KpH25grhUybj56ZBcu1hd';
+    
+    // Extract billing info from request (optional from frontend)
+    const { billingInfo } = req.body;
+    
+    // Dodo Payments requires billing field for subscriptions
+    // Use provided info or defaults that user can update on checkout page
+    const billing = billingInfo || {
+      city: "",  // User will update on checkout page
+      country: "US",  // Default, user can change
+      state: "",
+      street: "",
+      zipcode: ""
+    };
+    
+    logger.info('Creating subscription with SDK', { userId, userEmail, hasBillingInfo: !!billingInfo });
     
     // Create subscription with payment link using Dodo Payments SDK
     const subscriptionResponse = await dodoClient.subscriptions.create({
+      billing: billing,
       customer: {
         email: userEmail,
         name: userEmail.split('@')[0], // Extract name from email
       },
-      payment_link: true, // Generate payment link
+      payment_link: true, // Generate payment link for subscription
       product_id: productId,
       quantity: 1,
       return_url: redirectUrl || 'https://vanishdrop.com/payment/success',
@@ -95,7 +111,7 @@ router.post('/dodo/create-checkout', async (req, res) => {
       }
     });
     
-    logger.info('✅ Subscription checkout created successfully', { 
+    logger.info('✅ Subscription payment link created', { 
       paymentLink: subscriptionResponse.payment_link,
       subscriptionId: subscriptionResponse.subscription_id,
       userId, 
