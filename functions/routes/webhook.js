@@ -1,8 +1,18 @@
 import express from 'express';
 import { supabaseAdmin } from '../../config/supabase.js';
 import logger from '../utils/logger.js';
+import DodoPayments from 'dodopayments';
+import { Webhook } from 'standardwebhooks';
 
 const router = express.Router();
+
+// Initialize Dodo Payments client
+const dodoClient = new DodoPayments({
+  bearerToken: process.env.DODO_PAYMENTS_API_KEY,
+});
+
+// Initialize Webhook verifier
+const webhookVerifier = new Webhook(process.env.DODO_PAYMENTS_WEBHOOK_SECRET || 'whsec_hftWHCsZN6E+FcuG7GBiPrUUcoNoduTi');
 
 // Health check endpoint
 router.get('/dodo', (req, res) => {
@@ -48,7 +58,7 @@ router.get('/dodo/test', async (req, res) => {
   }
 });
 
-// Create Dodo Payments checkout session with proper metadata
+// Create Dodo Payments subscription checkout using official SDK pattern
 router.post('/dodo/create-checkout', async (req, res) => {
   try {
     logger.info('Checkout endpoint hit', { 
@@ -64,91 +74,42 @@ router.post('/dodo/create-checkout', async (req, res) => {
       return res.status(400).json({ error: 'userId and userEmail are required' });
     }
     
-    logger.info('Creating checkout session', { userId, userEmail });
+    logger.info('Creating subscription checkout session', { userId, userEmail });
     
-    // Create checkout session with Dodo Payments API - using correct format
-    const checkoutData = {
-      product_cart: [
-        {
-          product_id: 'pdt_KpH25grhUybj56ZBcu1hd',
-          quantity: 1
-        }
-      ],
-      customer_email: userEmail,
-      success_url: redirectUrl || 'https://vanishdrop.com/payment/success',
-      cancel_url: 'https://vanishdrop.com/pricing',
+    // Use official SDK pattern for subscription checkout
+    const productId = 'pdt_KpH25grhUybj56ZBcu1hd';
+    
+    // Create subscription with payment link using Dodo Payments SDK
+    const subscriptionResponse = await dodoClient.subscriptions.create({
+      customer: {
+        email: userEmail,
+        name: userEmail.split('@')[0], // Extract name from email
+      },
+      payment_link: true, // Generate payment link
+      product_id: productId,
+      quantity: 1,
+      return_url: redirectUrl || 'https://vanishdrop.com/payment/success',
       metadata: {
         user_id: userId,
         source: 'vanishdrop_webapp'
       }
-    };
-    
-    // Call Dodo Payments API to create checkout session
-    logger.info('Calling Dodo Payments API', { 
-      checkoutData,
-      apiUrl: 'https://live.dodopayments.com/checkouts'
     });
     
-    const dodoResponse = await fetch('https://live.dodopayments.com/checkouts', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.DODO_PAYMENTS_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(checkoutData)
-    });
-    
-    logger.info('Dodo Payments API response received', { 
-      status: dodoResponse.status,
-      statusText: dodoResponse.statusText,
-      ok: dodoResponse.ok
-    });
-    
-    if (!dodoResponse.ok) {
-      const errorText = await dodoResponse.text();
-      let errorData;
-      try {
-        errorData = JSON.parse(errorText);
-      } catch {
-        errorData = { raw: errorText };
-      }
-      logger.error('Dodo Payments API error', { 
-        status: dodoResponse.status,
-        statusText: dodoResponse.statusText,
-        error: errorData, 
-        userId, 
-        userEmail,
-        headers: Object.fromEntries(dodoResponse.headers.entries())
-      });
-      throw new Error(`Dodo Payments API error (${dodoResponse.status}): ${errorData.message || errorData.error || errorText || 'Unknown error'}`);
-    }
-    
-    const checkoutSession = await dodoResponse.json();
-    
-    logger.info('Checkout session created successfully', { 
-      fullResponse: checkoutSession,
-      sessionId: checkoutSession.id || checkoutSession.session_id, 
+    logger.info('✅ Subscription checkout created successfully', { 
+      paymentLink: subscriptionResponse.payment_link,
+      subscriptionId: subscriptionResponse.subscription_id,
       userId, 
       userEmail 
     });
     
-    // Dodo Payments may return different field names, so we need to check
-    const checkoutUrl = checkoutSession.url || checkoutSession.checkout_url || checkoutSession.payment_url;
-    const sessionId = checkoutSession.id || checkoutSession.session_id;
-    
-    if (!checkoutUrl) {
-      logger.error('No checkout URL in response', { checkoutSession });
-      throw new Error('No checkout URL received from Dodo Payments');
-    }
-    
     res.json({
       success: true,
-      checkoutUrl: checkoutUrl,
-      sessionId: sessionId
+      checkoutUrl: subscriptionResponse.payment_link,
+      subscriptionId: subscriptionResponse.subscription_id
     });
     
   } catch (error) {
-    logger.error('Failed to create checkout session', { 
+    logger.error('❌ Failed to create subscription checkout', { 
       error: error.message,
       errorStack: error.stack,
       errorName: error.name,
@@ -164,110 +125,162 @@ router.post('/dodo/create-checkout', async (req, res) => {
   }
 });
 
-// Dodo Payments Webhook Handler
+// Dodo Payments Webhook Handler (Following official pattern)
 // Docs: https://docs.dodopayments.com/developer-resources/webhooks
-router.post('/dodo', async (req, res) => {
+router.post('/dodo', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
-    logger.info('Dodo Payments webhook received', { 
+    // Get raw body for verification
+    const rawBody = req.body.toString('utf8');
+    
+    logger.info('📨 Dodo Payments webhook received', { 
       headers: req.headers,
-      body: req.body,
+      bodyPreview: rawBody.substring(0, 200),
       method: req.method,
       url: req.url
     });
 
-    // Verify webhook signature for security
-    const webhookSignature = req.headers['webhook-signature'] || req.headers['x-dodo-signature'] || req.headers['dodo-signature'];
-    const webhookId = req.headers['webhook-id'] || req.headers['x-webhook-id'];
-    const webhookTimestamp = req.headers['webhook-timestamp'] || req.headers['x-webhook-timestamp'];
-    const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+    // Verify webhook using official standardwebhooks library
+    const webhookHeaders = {
+      'webhook-id': req.headers['webhook-id'] || '',
+      'webhook-signature': req.headers['webhook-signature'] || '',
+      'webhook-timestamp': req.headers['webhook-timestamp'] || '',
+    };
     
-    if (webhookSecret && webhookSignature && webhookId && webhookTimestamp) {
-      try {
-        // Import crypto for signature verification
-        const crypto = await import('crypto');
-        
-        // Create the signature string
-        const payload = JSON.stringify(req.body);
-        const signatureString = `${webhookId}.${webhookTimestamp}.${payload}`;
-        
-        // Compute HMAC SHA256 signature
-        const computedSignature = crypto
-          .createHmac('sha256', webhookSecret)
-          .update(signatureString)
-          .digest('hex');
-        
-        // Compare signatures
-        if (computedSignature !== webhookSignature) {
-          logger.error('Webhook signature verification failed', {
-            computed: computedSignature,
-            received: webhookSignature,
-            webhookId,
-            webhookTimestamp
-          });
-          return res.status(401).json({ error: 'Invalid webhook signature' });
-        }
-        
-        logger.info('Webhook signature verified successfully');
-      } catch (signatureError) {
-        logger.error('Error verifying webhook signature', { error: signatureError.message });
-        return res.status(401).json({ error: 'Webhook signature verification failed' });
-      }
-    } else {
-      logger.warn('Webhook signature verification skipped', {
-        hasSecret: !!webhookSecret,
-        hasSignature: !!webhookSignature,
-        hasId: !!webhookId,
-        hasTimestamp: !!webhookTimestamp
+    try {
+      // Verify webhook signature using standardwebhooks
+      await webhookVerifier.verify(rawBody, webhookHeaders);
+      logger.info('✅ Webhook signature verified successfully - webhook is from Dodo Payments');
+    } catch (verificationError) {
+      logger.error('❌ Webhook verification failed', { 
+        error: verificationError.message,
+        headers: webhookHeaders
+      });
+      return res.status(401).json({ 
+        error: 'Webhook verification failed',
+        message: verificationError.message
       });
     }
-
-    // Handle different webhook events
-    const eventType = req.body.type || req.body.event_type || req.body.event?.type;
+    
+    // Parse the verified payload
+    const payload = JSON.parse(rawBody);
+    
+    // Extract event information
+    const eventType = payload.type;
+    const payloadType = payload.data?.payload_type; // 'Subscription' or 'Payment'
     
     if (!eventType) {
-      logger.error('No event type found in webhook payload', { body: req.body });
+      logger.error('No event type found in webhook payload', { payload });
       return res.status(400).json({ error: 'No event type found in payload' });
     }
     
-    logger.info('Processing webhook event', { eventType, body: req.body });
+    logger.info('📨 Processing Dodo Payments webhook event', { 
+      eventType, 
+      payloadType,
+      subscriptionId: payload.data?.subscription_id,
+      paymentId: payload.data?.payment_id
+    });
     
-    switch (eventType) {
-      case 'payment.succeeded':
-      case 'subscription.active':
-      case 'subscription.activated':
-      case 'subscription.renewed':
-        await handlePaymentSuccess(req, res);
-        break;
+    // Handle events based on payload type (official pattern)
+    if (payloadType === 'Subscription') {
+      // Retrieve full subscription data
+      const subscriptionId = payload.data?.subscription_id;
+      let subscriptionData = null;
+      
+      if (subscriptionId) {
+        try {
+          subscriptionData = await dodoClient.subscriptions.retrieve(subscriptionId);
+          logger.info('📋 Retrieved full subscription data', { 
+            subscriptionId,
+            status: subscriptionData.status,
+            customer: subscriptionData.customer_email
+          });
+        } catch (error) {
+          logger.warn('⚠️ Failed to retrieve subscription data', { error: error.message });
+        }
+      }
+      
+      // Handle Subscription Events
+      switch (eventType) {
+        case 'subscription.active':
+        case 'subscription.activated':
+          logger.info('🎉 Subscription activated - user upgraded to Pro');
+          await handleSubscriptionActivated(payload, subscriptionData, res);
+          break;
+        
+        case 'subscription.renewed':
+          logger.info('🔄 Subscription renewed - recurring payment processed');
+          await handleSubscriptionRenewed(payload, subscriptionData, res);
+          break;
 
-      case 'payment.failed':
-      case 'payment.cancelled':
-        await handlePaymentFailure(req, res);
-        break;
+        case 'subscription.cancelled':
+          logger.warn('🚫 Subscription cancelled');
+          await handleSubscriptionCancellation(payload, subscriptionData, res);
+          break;
+        
+        case 'subscription.expired':
+          logger.warn('⏰ Subscription expired');
+          await handleSubscriptionCancellation(payload, subscriptionData, res);
+          break;
+        
+        case 'subscription.paused':
+          logger.warn('⏸️ Subscription paused');
+          await handleSubscriptionCancellation(payload, subscriptionData, res);
+          break;
 
-      case 'subscription.cancelled':
-      case 'subscription.expired':
-      case 'subscription.paused':
-        await handleSubscriptionCancellation(req, res);
-        break;
+        case 'subscription.on_hold':
+        case 'subscription.suspended':
+        case 'subscription.failed':
+          logger.warn('⚠️ Subscription on hold/suspended/failed');
+          await handleSubscriptionHold(payload, subscriptionData, res);
+          break;
 
-      case 'subscription.on_hold':
-      case 'subscription.suspended':
-        await handleSubscriptionHold(req, res);
-        break;
+        case 'subscription.trial_started':
+        case 'subscription.trial_ended':
+          logger.info('🎁 Trial event:', eventType);
+          await handleTrialEvent(payload, subscriptionData, res);
+          break;
 
-      case 'subscription.trial_started':
-      case 'subscription.trial_ended':
-        await handleTrialEvent(req, res);
-        break;
-
-      case 'invoice.payment_failed':
-      case 'invoice.payment_succeeded':
-        await handleInvoiceEvent(req, res);
-        break;
-
-      default:
-        logger.info('Unhandled webhook event', { eventType, body: req.body });
-        res.json({ success: true, message: `Unhandled event: ${eventType}` });
+        default:
+          logger.info('❓ Unhandled subscription event', { eventType });
+          res.json({ success: true, message: `Subscription event received: ${eventType}` });
+      }
+    } else if (payloadType === 'Payment') {
+      // Handle Payment Events (one-time payments)
+      const paymentId = payload.data?.payment_id;
+      let paymentData = null;
+      
+      if (paymentId) {
+        try {
+          paymentData = await dodoClient.payments.retrieve(paymentId);
+          logger.info('📋 Retrieved full payment data', { 
+            paymentId,
+            status: paymentData.status
+          });
+        } catch (error) {
+          logger.warn('⚠️ Failed to retrieve payment data', { error: error.message });
+        }
+      }
+      
+      switch (eventType) {
+        case 'payment.succeeded':
+          logger.info('💰 One-time payment succeeded');
+          await handlePaymentSuccess(payload, paymentData, res);
+          break;
+        
+        case 'payment.failed':
+        case 'payment.cancelled':
+          logger.warn('⚠️ Payment failed or cancelled');
+          await handlePaymentFailure(payload, paymentData, res);
+          break;
+        
+        default:
+          logger.info('❓ Unhandled payment event', { eventType });
+          res.json({ success: true, message: `Payment event received: ${eventType}` });
+      }
+    } else {
+      // Handle other event types (invoices, etc.)
+      logger.info('❓ Unhandled payload type', { payloadType, eventType });
+      res.json({ success: true, message: `Webhook received: ${eventType}` });
     }
 
   } catch (error) {
@@ -284,26 +297,24 @@ router.post('/dodo', async (req, res) => {
   }
 });
 
-// Handle successful payments and subscription activation/renewal
-async function handlePaymentSuccess(req, res) {
+// Handle subscription activation (first payment or reactivation)
+async function handleSubscriptionActivated(payload, subscriptionData, res) {
   try {
-    const customerData = req.body.data?.customer || req.body.customer || req.body.data;
-    const customerId = customerData?.customer_id || customerData?.id;
-    const customerEmail = customerData?.email;
-    const metadata = req.body.data?.metadata || req.body.metadata || {};
+    const metadata = subscriptionData?.metadata || payload.data?.metadata || {};
     const userId = metadata.user_id;
-    const eventType = req.body.type || req.body.event_type;
+    const customerEmail = subscriptionData?.customer_email || payload.data?.customer?.email;
+    const eventType = payload.type;
     
-    logger.info('Processing payment success', { 
-      customerId, 
+    logger.info('💳 Processing subscription activation', { 
       customerEmail, 
       userId, 
-      eventType
+      eventType,
+      subscriptionId: subscriptionData?.subscription_id
     });
     
     // Check if we have user_id in metadata (preferred method)
     if (userId) {
-      logger.info('Found user_id in metadata, upgrading signed-in user', { userId });
+      logger.info('✅ Found user_id in metadata, activating subscription for user', { userId });
       
       const { error: updateError } = await supabaseAdmin
         .from('users')
@@ -315,12 +326,12 @@ async function handlePaymentSuccess(req, res) {
         .eq('id', userId);
 
       if (updateError) {
-        logger.error('Failed to update signed-in user subscription', { error: updateError, userId });
+        logger.error('❌ Failed to activate subscription for user', { error: updateError, userId });
         throw updateError;
       }
 
-      logger.info('Successfully upgraded signed-in user to Pro', { userId, eventType });
-      res.json({ success: true, message: `Signed-in user ${userId} upgraded to Pro (${eventType})` });
+      logger.info('🎉 Successfully activated Pro subscription for user', { userId, eventType });
+      res.json({ success: true, message: `User ${userId} subscription activated - upgraded to Pro (${eventType})` });
       return;
     }
     
@@ -408,15 +419,103 @@ async function handlePaymentSuccess(req, res) {
     res.json({ success: true, message: 'Webhook processed but no user information found' });
     
   } catch (error) {
-    logger.error('Error handling payment success', { error: error.message, body: req.body });
+    logger.error('Error handling subscription activation', { error: error.message, payload });
     throw error;
   }
 }
 
+// Handle subscription renewal (recurring payment)
+async function handleSubscriptionRenewed(payload, subscriptionData, res) {
+  try {
+    const metadata = subscriptionData?.metadata || payload.data?.metadata || {};
+    const userId = metadata.user_id;
+    const customerEmail = subscriptionData?.customer_email || payload.data?.customer?.email;
+    const eventType = payload.type;
+    
+    logger.info('🔄 Processing subscription renewal', { 
+      customerEmail, 
+      userId, 
+      eventType
+    });
+    
+    // Check if we have user_id in metadata
+    if (userId) {
+      logger.info('✅ Found user_id in metadata, renewing subscription for user', { userId });
+      
+      // User should already be Pro, but ensure they remain Pro after renewal
+      const { error: updateError } = await supabaseAdmin
+        .from('users')
+        .update({
+          subscription_tier: 'pro',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        logger.error('❌ Failed to renew subscription for user', { error: updateError, userId });
+        throw updateError;
+      }
+
+      logger.info('🎉 Successfully renewed Pro subscription for user', { userId, eventType });
+      res.json({ success: true, message: `User ${userId} subscription renewed - remains Pro (${eventType})` });
+      return;
+    }
+    
+    // Fallback: Find user by email
+    if (customerEmail) {
+      logger.info('No user_id in metadata, finding user by email for renewal', { customerEmail });
+      
+      const { data: userData, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('id, email')
+        .ilike('email', customerEmail)
+        .single();
+        
+      if (!userError && userData) {
+        const foundUserId = userData.id;
+        
+        const { error: updateError } = await supabaseAdmin
+          .from('users')
+          .update({
+            subscription_tier: 'pro',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', foundUserId);
+
+        if (updateError) {
+          logger.error('❌ Failed to renew subscription', { error: updateError, userId: foundUserId });
+          throw updateError;
+        }
+
+        logger.info('🎉 Successfully renewed subscription', { userId: foundUserId, eventType });
+        res.json({ success: true, message: `User ${foundUserId} subscription renewed (${eventType})` });
+        return;
+      }
+    }
+    
+    logger.warn('⚠️ User not found for subscription renewal', { customerEmail, userId });
+    res.json({ success: true, message: 'Subscription renewal processed but user not found' });
+    
+  } catch (error) {
+    logger.error('Error handling subscription renewal', { error: error.message, payload });
+    throw error;
+  }
+}
+
+// Handle payment success (one-time payments)
+async function handlePaymentSuccess(payload, paymentData, res) {
+  const eventType = payload.type;
+  const metadata = paymentData?.metadata || payload.data?.metadata || {};
+  const userId = metadata.user_id;
+  
+  logger.info('💰 One-time payment succeeded', { eventType, userId });
+  res.json({ success: true, message: `One-time payment succeeded for user ${userId || 'unknown'}` });
+}
+
 // Handle failed payments
-async function handlePaymentFailure(req, res) {
-  const eventType = req.body.type || req.body.event_type;
-  const metadata = req.body.data?.metadata || req.body.metadata || {};
+async function handlePaymentFailure(payload, paymentData, res) {
+  const eventType = payload.type;
+  const metadata = paymentData?.metadata || payload.data?.metadata || {};
   const userId = metadata.user_id;
   
   logger.warn('Payment failed', { eventType, userId });
@@ -424,9 +523,9 @@ async function handlePaymentFailure(req, res) {
 }
 
 // Handle subscription cancellation/expiration/pause
-async function handleSubscriptionCancellation(req, res) {
-  const eventType = req.body.type || req.body.event_type;
-  const metadata = req.body.data?.metadata || req.body.metadata || {};
+async function handleSubscriptionCancellation(payload, subscriptionData, res) {
+  const eventType = payload.type;
+  const metadata = subscriptionData?.metadata || payload.data?.metadata || {};
   const userId = metadata.user_id;
   
   if (userId) {
@@ -445,9 +544,9 @@ async function handleSubscriptionCancellation(req, res) {
 }
 
 // Handle subscription on hold/suspended
-async function handleSubscriptionHold(req, res) {
-  const eventType = req.body.type || req.body.event_type;
-  const metadata = req.body.data?.metadata || req.body.metadata || {};
+async function handleSubscriptionHold(payload, subscriptionData, res) {
+  const eventType = payload.type;
+  const metadata = subscriptionData?.metadata || payload.data?.metadata || {};
   const userId = metadata.user_id;
   
   if (userId) {
@@ -466,9 +565,9 @@ async function handleSubscriptionHold(req, res) {
 }
 
 // Handle trial events
-async function handleTrialEvent(req, res) {
-  const eventType = req.body.type || req.body.event_type;
-  const metadata = req.body.data?.metadata || req.body.metadata || {};
+async function handleTrialEvent(payload, subscriptionData, res) {
+  const eventType = payload.type;
+  const metadata = subscriptionData?.metadata || payload.data?.metadata || {};
   const userId = metadata.user_id;
   
   if (userId) {
@@ -500,9 +599,9 @@ async function handleTrialEvent(req, res) {
 }
 
 // Handle invoice events
-async function handleInvoiceEvent(req, res) {
-  const eventType = req.body.type || req.body.event_type;
-  const metadata = req.body.data?.metadata || req.body.metadata || {};
+async function handleInvoiceEvent(payload, invoiceData, res) {
+  const eventType = payload.type;
+  const metadata = payload.data?.metadata || {};
   const userId = metadata.user_id;
   
   if (userId && eventType === 'invoice.payment_failed') {
