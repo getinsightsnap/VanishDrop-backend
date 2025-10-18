@@ -4,100 +4,76 @@ import logger from '../utils/logger.js';
 
 const router = express.Router();
 
-// Test endpoint to verify webhook URL is accessible
+// Health check endpoint
 router.get('/dodo', (req, res) => {
   res.json({ 
     message: 'Webhook endpoint is accessible',
     timestamp: new Date().toISOString(),
-    method: 'GET'
+    status: 'healthy'
   });
 });
 
-// Debug endpoint to test webhook processing with sample data
-router.post('/dodo/debug', async (req, res) => {
+// Create Dodo Payments checkout session with proper metadata
+router.post('/dodo/create-checkout', async (req, res) => {
   try {
-    console.log('=== DEBUG WEBHOOK TEST ===');
-    console.log('Test payload:', req.body);
+    const { userId, userEmail, redirectUrl } = req.body;
     
-    // Simulate a payment.succeeded event
-    const testPayload = {
-      type: 'payment.succeeded',
-      data: {
-        customer: {
-          email: req.body.testEmail || 'test@example.com',
-          customer_id: 'test_customer_123'
-        },
-        metadata: {
-          user_id: req.body.testUserId || null
-        }
+    if (!userId || !userEmail) {
+      return res.status(400).json({ error: 'userId and userEmail are required' });
+    }
+    
+    logger.info('Creating checkout session', { userId, userEmail });
+    
+    // Create checkout session with Dodo Payments API
+    const checkoutData = {
+      product_id: 'pdt_KpH25grhUybj56ZBcu1hd',
+      quantity: 1,
+      customer_email: userEmail,
+      redirect_url: redirectUrl || 'https://vanishdrop.com/payment/success',
+      metadata: {
+        user_id: userId,
+        source: 'vanishdrop_webapp'
       }
     };
     
-    console.log('Simulating webhook with payload:', testPayload);
-    
-    // Process the test payload
-    req.body = testPayload;
-    
-    // Call the main webhook handler
-    await router.handle(req, res);
-    
-  } catch (error) {
-    console.error('Debug webhook test error:', error);
-    res.status(500).json({ 
-      error: 'Debug test failed', 
-      message: error.message 
+    // Call Dodo Payments API to create checkout session
+    const dodoResponse = await fetch('https://api.dodopayments.com/v1/checkout/sessions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.DODO_PAYMENTS_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(checkoutData)
     });
-  }
-});
-
-// Debug endpoint to check if user exists in database
-router.get('/dodo/check-user/:email', async (req, res) => {
-  try {
-    const email = req.params.email;
-    console.log('Checking user existence for email:', email);
     
-    // Check with case-insensitive search
-    const { data: userData, error: userError } = await supabaseAdmin
-      .from('users')
-      .select('id, email, subscription_tier, created_at')
-      .ilike('email', email)
-      .single();
-      
-    if (userError || !userData) {
-      // Try exact match
-      const { data: exactUserData, error: exactUserError } = await supabaseAdmin
-        .from('users')
-        .select('id, email, subscription_tier, created_at')
-        .eq('email', email)
-        .single();
-        
-      if (exactUserError || !exactUserData) {
-        return res.json({
-          found: false,
-          email: email,
-          caseInsensitiveError: userError?.message,
-          exactMatchError: exactUserError?.message,
-          message: 'User not found in database'
-        });
-      }
-      
-      return res.json({
-        found: true,
-        user: exactUserData,
-        matchType: 'exact'
-      });
+    if (!dodoResponse.ok) {
+      const errorData = await dodoResponse.json();
+      logger.error('Dodo Payments API error', { error: errorData, userId, userEmail });
+      throw new Error(`Dodo Payments API error: ${errorData.message || 'Unknown error'}`);
     }
     
+    const checkoutSession = await dodoResponse.json();
+    
+    logger.info('Checkout session created successfully', { 
+      sessionId: checkoutSession.id, 
+      userId, 
+      userEmail 
+    });
+    
     res.json({
-      found: true,
-      user: userData,
-      matchType: 'case-insensitive'
+      success: true,
+      checkoutUrl: checkoutSession.url,
+      sessionId: checkoutSession.id
     });
     
   } catch (error) {
-    console.error('Debug user check error:', error);
+    logger.error('Failed to create checkout session', { 
+      error: error.message, 
+      body: req.body 
+    });
+    
     res.status(500).json({ 
-      error: 'User check failed', 
+      error: 'Failed to create checkout session', 
       message: error.message 
     });
   }
@@ -107,13 +83,6 @@ router.get('/dodo/check-user/:email', async (req, res) => {
 // Docs: https://docs.dodopayments.com/developer-resources/webhooks
 router.post('/dodo', async (req, res) => {
   try {
-    console.log('=== WEBHOOK CALLED ===');
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
-    console.log('Method:', req.method);
-    console.log('URL:', req.url);
-    console.log('========================');
-    
     logger.info('Dodo Payments webhook received', { 
       headers: req.headers,
       body: req.body,
@@ -126,14 +95,6 @@ router.post('/dodo', async (req, res) => {
     const webhookId = req.headers['webhook-id'] || req.headers['x-webhook-id'];
     const webhookTimestamp = req.headers['webhook-timestamp'] || req.headers['x-webhook-timestamp'];
     const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
-    
-    console.log('Webhook signature verification headers:', {
-      signature: webhookSignature,
-      id: webhookId,
-      timestamp: webhookTimestamp,
-      hasSecret: !!webhookSecret,
-      allHeaders: Object.keys(req.headers)
-    });
     
     if (webhookSecret && webhookSignature && webhookId && webhookTimestamp) {
       try {
@@ -152,7 +113,6 @@ router.post('/dodo', async (req, res) => {
         
         // Compare signatures
         if (computedSignature !== webhookSignature) {
-          console.error('Webhook signature verification failed');
           logger.error('Webhook signature verification failed', {
             computed: computedSignature,
             received: webhookSignature,
@@ -162,15 +122,12 @@ router.post('/dodo', async (req, res) => {
           return res.status(401).json({ error: 'Invalid webhook signature' });
         }
         
-        console.log('✅ Webhook signature verified successfully');
         logger.info('Webhook signature verified successfully');
       } catch (signatureError) {
-        console.error('Error verifying webhook signature:', signatureError);
         logger.error('Error verifying webhook signature', { error: signatureError.message });
         return res.status(401).json({ error: 'Webhook signature verification failed' });
       }
     } else {
-      console.warn('Webhook signature verification skipped - missing required headers or secret');
       logger.warn('Webhook signature verification skipped', {
         hasSecret: !!webhookSecret,
         hasSignature: !!webhookSignature,
@@ -180,321 +137,60 @@ router.post('/dodo', async (req, res) => {
     }
 
     // Handle different webhook events
-    // Dodo Payments webhook structure can vary, check multiple possible locations
     const eventType = req.body.type || req.body.event_type || req.body.event?.type;
     
-    console.log('Event type:', eventType);
-    console.log('Full payload structure:', JSON.stringify(req.body, null, 2));
-    console.log('Available keys in body:', Object.keys(req.body));
-    
     if (!eventType) {
-      console.error('No event type found in webhook payload');
       logger.error('No event type found in webhook payload', { body: req.body });
       return res.status(400).json({ error: 'No event type found in payload' });
     }
+    
+    logger.info('Processing webhook event', { eventType, body: req.body });
     
     switch (eventType) {
       case 'payment.succeeded':
       case 'subscription.active':
       case 'subscription.activated':
       case 'subscription.renewed':
-        // Handle successful payments and subscription activation/renewal
-        // Check multiple possible locations for customer data
-        const customerData = req.body.data?.customer || req.body.customer || req.body.data;
-        const customerId = customerData?.customer_id || customerData?.id;
-        const customerEmail = customerData?.email;
-        const metadata = req.body.data?.metadata || req.body.metadata || {};
-        const userId = metadata.user_id;
-        
-        console.log('Processing payment success:', { 
-          customerId, 
-          customerEmail, 
-          userId, 
-          metadata, 
-          eventType,
-          fullData: req.body.data
-        });
-        
-        // Since user_id is not in metadata, we need to find the user by email
-        if (!userId && customerEmail) {
-          console.log('No user_id in metadata, trying to find user by email:', customerEmail);
-          
-          try {
-            // Find user by email (case-insensitive)
-            const { data: userData, error: userError } = await supabaseAdmin
-              .from('users')
-              .select('id, email')
-              .ilike('email', customerEmail) // Case-insensitive search
-              .single();
-              
-            if (userError || !userData) {
-              console.error('User not found by email (case-insensitive):', customerEmail, 'Error:', userError);
-              logger.error('User not found by email (case-insensitive)', { email: customerEmail, error: userError });
-              
-              // Try exact match as fallback
-              const { data: exactUserData, error: exactUserError } = await supabaseAdmin
-                .from('users')
-                .select('id, email')
-                .eq('email', customerEmail)
-                .single();
-                
-              if (exactUserError || !exactUserData) {
-                console.error('User not found with exact email match either:', customerEmail);
-                logger.error('User not found by email after both case-insensitive and exact match attempts', { 
-                  email: customerEmail, 
-                  caseInsensitiveError: userError,
-                  exactMatchError: exactUserError 
-                });
-                
-                // User not found in database - this should be handled by the database trigger
-                // Return success to prevent webhook retries, but log the issue
-                console.log('⚠️  User not found in database - check if database trigger is working');
-                logger.warn('User not found in database for webhook', { 
-                  email: customerEmail, 
-                  eventType,
-                  customerId,
-                  suggestion: 'Check if database trigger is working or user needs to be created manually'
-                });
-                
-                return res.json({ 
-                  success: true, 
-                  message: `Webhook processed but user not found: ${customerEmail}`,
-                  warning: 'User not found in database - check database trigger'
-                });
-              }
-              
-              // Use exact match result
-              const foundUserId = exactUserData.id;
-              console.log('Found user with exact email match:', foundUserId);
-              
-              // Update user subscription to pro
-              const { error: updateError } = await supabaseAdmin
-                .from('users')
-                .update({
-                  subscription_tier: 'pro',
-                  upgraded_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', foundUserId);
-
-              if (updateError) {
-                console.error('Error updating user subscription:', updateError);
-                logger.error('Failed to update user subscription', { error: updateError, userId: foundUserId });
-                throw updateError;
-              }
-
-              console.log(`✅ Successfully upgraded user ${foundUserId} to Pro (${eventType})`);
-              logger.info(`User upgraded to Pro`, { userId: foundUserId, eventType });
-              
-              res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
-              return;
-            }
-            
-            // Use the found user ID (case-insensitive match worked)
-            const foundUserId = userData.id;
-            console.log('Found user by email (case-insensitive):', foundUserId);
-            
-            // Update user subscription to pro
-            const { error: updateError } = await supabaseAdmin
-              .from('users')
-              .update({
-                subscription_tier: 'pro',
-                upgraded_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', foundUserId);
-
-            if (updateError) {
-              console.error('Error updating user subscription:', updateError);
-              logger.error('Failed to update user subscription', { error: updateError, userId: foundUserId });
-              throw updateError;
-            }
-
-            console.log(`✅ Successfully upgraded user ${foundUserId} to Pro (${eventType})`);
-            logger.info(`User upgraded to Pro`, { userId: foundUserId, eventType });
-            
-            res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
-            return;
-            
-          } catch (emailLookupError) {
-            console.error('Error during email lookup:', emailLookupError);
-            logger.error('Email lookup failed', { error: emailLookupError, email: customerEmail });
-            return res.status(500).json({ 
-              error: 'Failed to lookup user by email', 
-              details: emailLookupError.message 
-            });
-          }
-        }
-        
-        if (!userId) {
-          console.error('No user_id in webhook metadata and no customer email');
-          logger.error('Missing user_id in webhook metadata and no customer email', { body: req.body });
-          return res.status(400).json({ error: 'Missing user_id in metadata and no customer email' });
-        }
-
-        // Update user subscription to pro
-        const { error: updateError } = await supabaseAdmin
-          .from('users')
-          .update({
-            subscription_tier: 'pro',
-            upgraded_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', userId);
-
-        if (updateError) {
-          console.error('Error updating user subscription:', updateError);
-          logger.error('Failed to update user subscription', { error: updateError, userId });
-          throw updateError;
-        }
-
-        console.log(`✅ Successfully upgraded user ${userId} to Pro (${eventType})`);
-        logger.info(`User upgraded to Pro`, { userId, eventType });
-        
-        res.json({ success: true, message: `User ${userId} upgraded to Pro (${eventType})` });
+        await handlePaymentSuccess(req, res);
         break;
 
       case 'payment.failed':
       case 'payment.cancelled':
-        // Handle failed payments
-        const failedMetadata = req.body.data?.metadata || {};
-        const failedUserId = failedMetadata.user_id;
-        
-        console.log('Processing payment failure:', { eventType, failedUserId });
-        
-        if (failedUserId) {
-          // Log the payment failure but don't change subscription yet
-          // User might retry payment
-          logger.warn(`Payment failed for user`, { userId: failedUserId, eventType });
-        }
-        
-        res.json({ success: true, message: `Payment failed for user ${failedUserId}` });
+        await handlePaymentFailure(req, res);
         break;
 
       case 'subscription.cancelled':
       case 'subscription.expired':
       case 'subscription.paused':
-        // Handle subscription cancellation/expiration/pause
-        const cancelMetadata = req.body.data?.metadata || {};
-        const cancelUserId = cancelMetadata.user_id;
-        
-        console.log('Processing subscription cancellation:', { eventType, cancelUserId });
-        
-        if (cancelUserId) {
-          await supabaseAdmin
-            .from('users')
-            .update({
-              subscription_tier: 'free',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', cancelUserId);
-            
-          console.log(`Downgraded user ${cancelUserId} to Free (${eventType})`);
-          logger.info(`User downgraded to Free`, { userId: cancelUserId, eventType });
-        }
-        
-        res.json({ success: true, message: `User ${cancelUserId} downgraded to Free (${eventType})` });
+        await handleSubscriptionCancellation(req, res);
         break;
 
       case 'subscription.on_hold':
       case 'subscription.suspended':
-        // Handle subscription on hold/suspended
-        const holdMetadata = req.body.data?.metadata || {};
-        const holdUserId = holdMetadata.user_id;
-        
-        console.log('Processing subscription on hold:', { eventType, holdUserId });
-        
-        if (holdUserId) {
-          // Option 1: Downgrade to free immediately
-          await supabaseAdmin
-            .from('users')
-            .update({
-              subscription_tier: 'free',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', holdUserId);
-            
-          console.log(`Downgraded user ${holdUserId} to Free (subscription on hold)`);
-          logger.info(`User downgraded due to subscription hold`, { userId: holdUserId });
-          
-          // Option 2: Keep Pro but mark as on hold (alternative approach)
-          // await supabaseAdmin
-          //   .from('users')
-          //   .update({
-          //     subscription_status: 'on_hold',
-          //     updated_at: new Date().toISOString(),
-          //   })
-          //   .eq('id', holdUserId);
-        }
-        
-        res.json({ success: true, message: `User ${holdUserId} subscription on hold` });
+        await handleSubscriptionHold(req, res);
         break;
 
       case 'subscription.trial_started':
       case 'subscription.trial_ended':
-        // Handle trial events (if you implement trials)
-        const trialMetadata = req.body.data?.metadata || {};
-        const trialUserId = trialMetadata.user_id;
-        
-        console.log('Processing trial event:', { eventType, trialUserId });
-        
-        if (trialUserId) {
-          if (eventType === 'subscription.trial_started') {
-            // User started trial
-            await supabaseAdmin
-              .from('users')
-              .update({
-                subscription_tier: 'pro',
-                trial_used: true,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', trialUserId);
-            
-            logger.info(`User started trial`, { userId: trialUserId });
-          } else if (eventType === 'subscription.trial_ended') {
-            // Trial ended - check if they have active subscription
-            // If no active subscription, downgrade to free
-            await supabaseAdmin
-              .from('users')
-              .update({
-                subscription_tier: 'free',
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', trialUserId);
-            
-            logger.info(`User trial ended, downgraded to free`, { userId: trialUserId });
-          }
-        }
-        
-        res.json({ success: true, message: `Trial event processed for user ${trialUserId}` });
+        await handleTrialEvent(req, res);
         break;
 
       case 'invoice.payment_failed':
       case 'invoice.payment_succeeded':
-        // Handle invoice events
-        const invoiceMetadata = req.body.data?.metadata || {};
-        const invoiceUserId = invoiceMetadata.user_id;
-        
-        console.log('Processing invoice event:', { eventType, invoiceUserId });
-        
-        if (invoiceUserId && eventType === 'invoice.payment_failed') {
-          // Payment failed for recurring subscription
-          // You might want to send notification email here
-          logger.warn(`Invoice payment failed for user`, { userId: invoiceUserId });
-        }
-        
-        res.json({ success: true, message: `Invoice event processed for user ${invoiceUserId}` });
+        await handleInvoiceEvent(req, res);
         break;
 
       default:
-        console.log(`Unhandled webhook event: ${eventType}`);
-        logger.info(`Unhandled webhook event`, { eventType, body: req.body });
+        logger.info('Unhandled webhook event', { eventType, body: req.body });
         res.json({ success: true, message: `Unhandled event: ${eventType}` });
     }
 
   } catch (error) {
-    console.error('Webhook processing error:', error);
-    logger.error('Webhook processing failed', { error: error.message, stack: error.stack });
+    logger.error('Webhook processing failed', { 
+      error: error.message, 
+      stack: error.stack,
+      body: req.body 
+    });
     
     res.status(500).json({ 
       error: 'Internal server error', 
@@ -502,5 +198,233 @@ router.post('/dodo', async (req, res) => {
     });
   }
 });
+
+// Handle successful payments and subscription activation/renewal
+async function handlePaymentSuccess(req, res) {
+  try {
+    const customerData = req.body.data?.customer || req.body.customer || req.body.data;
+    const customerId = customerData?.customer_id || customerData?.id;
+    const customerEmail = customerData?.email;
+    const metadata = req.body.data?.metadata || req.body.metadata || {};
+    const userId = metadata.user_id;
+    const eventType = req.body.type || req.body.event_type;
+    
+    logger.info('Processing payment success', { 
+      customerId, 
+      customerEmail, 
+      userId, 
+      eventType
+    });
+    
+    // Check if we have user_id in metadata (preferred method)
+    if (userId) {
+      logger.info('Found user_id in metadata, upgrading signed-in user', { userId });
+      
+      const { error: updateError } = await supabaseAdmin
+        .from('users')
+        .update({
+          subscription_tier: 'pro',
+          upgraded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        logger.error('Failed to update signed-in user subscription', { error: updateError, userId });
+        throw updateError;
+      }
+
+      logger.info('Successfully upgraded signed-in user to Pro', { userId, eventType });
+      res.json({ success: true, message: `Signed-in user ${userId} upgraded to Pro (${eventType})` });
+      return;
+    }
+    
+    // Fallback: Find user by email if no user_id in metadata
+    if (customerEmail) {
+      logger.info('No user_id in metadata, trying to find user by email', { customerEmail });
+      
+      const { data: userData, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('id, email')
+        .ilike('email', customerEmail)
+        .single();
+        
+      if (userError || !userData) {
+        // Try exact match as fallback
+        const { data: exactUserData, error: exactUserError } = await supabaseAdmin
+          .from('users')
+          .select('id, email')
+          .eq('email', customerEmail)
+          .single();
+          
+        if (exactUserError || !exactUserData) {
+          logger.warn('User not found in database for webhook', { 
+            email: customerEmail, 
+            eventType,
+            customerId,
+            suggestion: 'User may have entered different email in checkout'
+          });
+          
+          res.json({ 
+            success: true, 
+            message: `Webhook processed but user not found: ${customerEmail}`,
+            warning: 'User not found in database'
+          });
+          return;
+        }
+        
+        // Use exact match result
+        const foundUserId = exactUserData.id;
+        logger.info('Found user with exact email match', { foundUserId });
+        
+        const { error: updateError } = await supabaseAdmin
+          .from('users')
+          .update({
+            subscription_tier: 'pro',
+            upgraded_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', foundUserId);
+
+        if (updateError) {
+          logger.error('Failed to update user subscription', { error: updateError, userId: foundUserId });
+          throw updateError;
+        }
+
+        logger.info('Successfully upgraded user to Pro', { userId: foundUserId, eventType });
+        res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
+        return;
+      }
+      
+      // Use case-insensitive match result
+      const foundUserId = userData.id;
+      logger.info('Found user with case-insensitive email match', { foundUserId });
+      
+      const { error: updateError } = await supabaseAdmin
+        .from('users')
+        .update({
+          subscription_tier: 'pro',
+          upgraded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', foundUserId);
+
+      if (updateError) {
+        logger.error('Failed to update user subscription', { error: updateError, userId: foundUserId });
+        throw updateError;
+      }
+
+      logger.info('Successfully upgraded user to Pro', { userId: foundUserId, eventType });
+      res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
+      return;
+    }
+    
+    logger.warn('No user_id or customer email found in webhook', { body: req.body });
+    res.json({ success: true, message: 'Webhook processed but no user information found' });
+    
+  } catch (error) {
+    logger.error('Error handling payment success', { error: error.message, body: req.body });
+    throw error;
+  }
+}
+
+// Handle failed payments
+async function handlePaymentFailure(req, res) {
+  const eventType = req.body.type || req.body.event_type;
+  const metadata = req.body.data?.metadata || req.body.metadata || {};
+  const userId = metadata.user_id;
+  
+  logger.warn('Payment failed', { eventType, userId });
+  res.json({ success: true, message: `Payment failed for user ${userId || 'unknown'}` });
+}
+
+// Handle subscription cancellation/expiration/pause
+async function handleSubscriptionCancellation(req, res) {
+  const eventType = req.body.type || req.body.event_type;
+  const metadata = req.body.data?.metadata || req.body.metadata || {};
+  const userId = metadata.user_id;
+  
+  if (userId) {
+    await supabaseAdmin
+      .from('users')
+      .update({
+        subscription_tier: 'free',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+      
+    logger.info('User downgraded to Free', { userId, eventType });
+  }
+  
+  res.json({ success: true, message: `User ${userId || 'unknown'} downgraded to Free (${eventType})` });
+}
+
+// Handle subscription on hold/suspended
+async function handleSubscriptionHold(req, res) {
+  const eventType = req.body.type || req.body.event_type;
+  const metadata = req.body.data?.metadata || req.body.metadata || {};
+  const userId = metadata.user_id;
+  
+  if (userId) {
+    await supabaseAdmin
+      .from('users')
+      .update({
+        subscription_tier: 'free',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+      
+    logger.info('User downgraded due to subscription hold', { userId });
+  }
+  
+  res.json({ success: true, message: `User ${userId || 'unknown'} subscription on hold` });
+}
+
+// Handle trial events
+async function handleTrialEvent(req, res) {
+  const eventType = req.body.type || req.body.event_type;
+  const metadata = req.body.data?.metadata || req.body.metadata || {};
+  const userId = metadata.user_id;
+  
+  if (userId) {
+    if (eventType === 'subscription.trial_started') {
+      await supabaseAdmin
+        .from('users')
+        .update({
+          subscription_tier: 'pro',
+          trial_used: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+      
+      logger.info('User started trial', { userId });
+    } else if (eventType === 'subscription.trial_ended') {
+      await supabaseAdmin
+        .from('users')
+        .update({
+          subscription_tier: 'free',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+      
+      logger.info('User trial ended, downgraded to free', { userId });
+    }
+  }
+  
+  res.json({ success: true, message: `Trial event processed for user ${userId || 'unknown'}` });
+}
+
+// Handle invoice events
+async function handleInvoiceEvent(req, res) {
+  const eventType = req.body.type || req.body.event_type;
+  const metadata = req.body.data?.metadata || req.body.metadata || {};
+  const userId = metadata.user_id;
+  
+  if (userId && eventType === 'invoice.payment_failed') {
+    logger.warn('Invoice payment failed for user', { userId });
+  }
+  
+  res.json({ success: true, message: `Invoice event processed for user ${userId || 'unknown'}` });
+}
 
 export default router;
