@@ -79,8 +79,8 @@ router.post('/dodo/create-checkout', async (req, res) => {
     // For subscriptions, use SDK with payment_link: true (following official pattern)
     const productId = 'pdt_KpH25grhUybj56ZBcu1hd';
     
-    // Extract billing info from request (optional from frontend)
-    const { billingInfo } = req.body;
+    // Extract billing info and discount code from request (optional from frontend)
+    const { billingInfo, discountCode } = req.body;
     
     // Dodo Payments requires billing field for subscriptions
     // Use provided info or defaults that user can update on checkout page
@@ -95,7 +95,7 @@ router.post('/dodo/create-checkout', async (req, res) => {
     logger.info('Creating subscription with SDK', { userId, userEmail, hasBillingInfo: !!billingInfo });
     
     // Create subscription with payment link using Dodo Payments SDK
-    const subscriptionResponse = await dodoClient.subscriptions.create({
+    const subscriptionPayload = {
       billing: billing,
       customer: {
         email: userEmail,
@@ -109,7 +109,15 @@ router.post('/dodo/create-checkout', async (req, res) => {
         user_id: userId,
         source: 'vanishdrop_webapp'
       }
-    });
+    };
+    
+    // Add discount code if provided
+    if (discountCode) {
+      subscriptionPayload.discount_code = discountCode;
+      logger.info('Applying discount code', { discountCode });
+    }
+    
+    const subscriptionResponse = await dodoClient.subscriptions.create(subscriptionPayload);
     
     logger.info('✅ Subscription payment link created', { 
       paymentLink: subscriptionResponse.payment_link,
