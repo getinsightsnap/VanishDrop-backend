@@ -13,6 +13,7 @@ Add these to your Railway environment:
 SUPABASE_URL=https://mafttcvhinlestxrtjfa.supabase.co
 SUPABASE_SERVICE_KEY=your_supabase_service_key_here
 DODO_PAYMENTS_API_KEY=BBaQwaRKbrty9MNs.LSJE_s4nyd_RkCRibSqEsOWnaeVc2-7iBIXaKLZ2uLa8PAi_
+DODO_PAYMENTS_WEBHOOK_SECRET=whsec_hftWHCsZN6E+FcuG7GBiPrUUcoNoduTi
 NODE_ENV=production
 ```
 
