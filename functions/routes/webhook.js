@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../../config/supabase.js';
 import logger from '../utils/logger.js';
 import DodoPayments from 'dodopayments';
 import { Webhook } from 'standardwebhooks';
+import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -15,13 +16,50 @@ const dodoClient = new DodoPayments({
 const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
 let webhookVerifier = null;
 
+// Custom webhook verification function for Dodo Payments
+function verifyDodoWebhookSignature(payload, signature, secret, timestamp) {
+  try {
+    // Dodo Payments uses HMAC-SHA256 with specific format
+    // Signature format: v1,<base64_signature>
+    if (!signature.startsWith('v1,')) {
+      throw new Error('Invalid signature format - must start with v1,');
+    }
+    
+    const actualSignature = signature.substring(3); // Remove 'v1,' prefix
+    
+    // Create the payload to sign: timestamp + payload
+    const payloadToSign = timestamp + payload;
+    
+    // Create HMAC-SHA256 signature
+    const hmac = crypto.createHmac('sha256', secret);
+    hmac.update(payloadToSign, 'utf8');
+    const expectedSignature = hmac.digest('base64');
+    
+    // Compare signatures using timing-safe comparison
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(actualSignature, 'base64'),
+      Buffer.from(expectedSignature, 'base64')
+    );
+    
+    if (!isValid) {
+      throw new Error('Signature verification failed');
+    }
+    
+    return true;
+  } catch (error) {
+    throw new Error(`Webhook verification failed: ${error.message}`);
+  }
+}
+
 // Only initialize webhook verifier if we have a valid secret
 if (webhookSecret && 
     webhookSecret !== 'your_dodo_payments_webhook_secret_here' && 
     webhookSecret.startsWith('whsec_')) {
   try {
-    webhookVerifier = new Webhook(webhookSecret);
-    console.log('✅ Webhook verifier initialized successfully');
+    // Remove whsec_ prefix for standardwebhooks library
+    const cleanSecret = webhookSecret.substring(6); // Remove 'whsec_' (6 characters)
+    webhookVerifier = new Webhook(cleanSecret);
+    console.log('✅ Webhook verifier initialized successfully with clean secret');
   } catch (error) {
     console.warn('⚠️ Invalid webhook secret format, webhook verification disabled:', error.message);
   }
@@ -184,22 +222,31 @@ router.post('/dodo', express.raw({ type: 'application/json' }), async (req, res)
       url: req.url
     });
 
-    // Verify webhook using official standardwebhooks library
-    const webhookHeaders = {
-      'webhook-id': req.headers['webhook-id'] || '',
-      'webhook-signature': req.headers['webhook-signature'] || '',
-      'webhook-timestamp': req.headers['webhook-timestamp'] || '',
-    };
+    // Verify webhook using custom Dodo Payments verification
+    const signature = req.headers['webhook-signature'] || '';
+    const timestamp = req.headers['webhook-timestamp'] || '';
+    const webhookId = req.headers['webhook-id'] || '';
     
-    if (webhookVerifier) {
+    logger.info('🔍 Attempting webhook verification', {
+      webhookId,
+      signature: signature.substring(0, 20) + '...',
+      timestamp,
+      bodyLength: rawBody.length
+    });
+    
+    if (webhookSecret && webhookSecret.startsWith('whsec_')) {
       try {
-        // Verify webhook signature using standardwebhooks
-        await webhookVerifier.verify(rawBody, webhookHeaders);
+        // Use custom Dodo Payments verification
+        const cleanSecret = webhookSecret.substring(6); // Remove 'whsec_' prefix
+        verifyDodoWebhookSignature(rawBody, signature, cleanSecret, timestamp);
         logger.info('✅ Webhook signature verified successfully - webhook is from Dodo Payments');
       } catch (verificationError) {
         logger.error('❌ Webhook verification failed', { 
           error: verificationError.message,
-          headers: webhookHeaders
+          webhookId,
+          signature: signature.substring(0, 20) + '...',
+          timestamp,
+          bodyLength: rawBody.length
         });
         return res.status(401).json({ 
           error: 'Webhook verification failed',
