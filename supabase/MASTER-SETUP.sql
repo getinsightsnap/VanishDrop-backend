@@ -41,6 +41,96 @@ BEGIN
   END IF;
 END $$;
 
+-- Add watermark tracking for free users
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'users' 
+    AND column_name = 'free_uploads_without_watermark'
+  ) THEN
+    ALTER TABLE public.users ADD COLUMN free_uploads_without_watermark INTEGER DEFAULT 10;
+    RAISE NOTICE '✅ Added free_uploads_without_watermark column';
+  END IF;
+END $$;
+
+-- Add watermark flag to share_links table
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'share_links' 
+    AND column_name = 'has_watermark'
+  ) THEN
+    ALTER TABLE public.share_links ADD COLUMN has_watermark BOOLEAN DEFAULT FALSE;
+    RAISE NOTICE '✅ Added has_watermark column to share_links';
+  END IF;
+END $$;
+
+-- Add download_allowed flag to share_links table
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'share_links' 
+    AND column_name = 'download_allowed'
+  ) THEN
+    ALTER TABLE public.share_links ADD COLUMN download_allowed BOOLEAN DEFAULT TRUE;
+    RAISE NOTICE '✅ Added download_allowed column to share_links';
+  END IF;
+END $$;
+
+-- Add QR code generation counter for free users
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'users' 
+    AND column_name = 'qr_codes_generated'
+  ) THEN
+    ALTER TABLE public.users ADD COLUMN qr_codes_generated INTEGER DEFAULT 0;
+    RAISE NOTICE '✅ Added qr_codes_generated column to users';
+  END IF;
+END $$;
+
+-- Add Dodo Payments session ID
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'users' 
+    AND column_name = 'dodo_session_id'
+  ) THEN
+    ALTER TABLE public.users ADD COLUMN dodo_session_id TEXT;
+    RAISE NOTICE '✅ Added dodo_session_id column to users';
+  END IF;
+END $$;
+
+-- Add upgrade timestamp
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'users' 
+    AND column_name = 'upgraded_at'
+  ) THEN
+    ALTER TABLE public.users ADD COLUMN upgraded_at TIMESTAMPTZ;
+    RAISE NOTICE '✅ Added upgraded_at column to users';
+  END IF;
+END $$;
+
 -- Uploaded files table (user_id will be made nullable later)
 CREATE TABLE IF NOT EXISTS public.uploaded_files (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -65,6 +155,8 @@ CREATE TABLE IF NOT EXISTS public.share_links (
   password_hash TEXT,
   require_otp BOOLEAN DEFAULT FALSE,
   qr_code_enabled BOOLEAN DEFAULT FALSE,
+  has_watermark BOOLEAN DEFAULT FALSE,
+  download_allowed BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -75,6 +167,27 @@ CREATE TABLE IF NOT EXISTS public.access_logs (
   accessed_at TIMESTAMPTZ DEFAULT NOW(),
   ip_address TEXT NOT NULL,
   success BOOLEAN NOT NULL
+);
+
+-- Share link history table (for expired/deleted links)
+CREATE TABLE IF NOT EXISTS public.share_link_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  original_share_link_id UUID, -- Reference to original share link (may be deleted)
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  file_size BIGINT NOT NULL,
+  file_type TEXT,
+  share_token TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  max_opens INTEGER,
+  final_opens INTEGER DEFAULT 0, -- How many times it was actually accessed
+  had_password BOOLEAN DEFAULT FALSE,
+  had_otp BOOLEAN DEFAULT FALSE,
+  had_qr_code BOOLEAN DEFAULT FALSE,
+  had_watermark BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  archived_at TIMESTAMPTZ DEFAULT NOW(),
+  status TEXT DEFAULT 'expired' CHECK (status IN ('expired', 'deleted', 'max_opens_reached'))
 );
 
 -- ============================================================================
@@ -134,6 +247,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  -- Insert user into public.users table
   INSERT INTO public.users (
     id,
     email,
@@ -142,6 +256,8 @@ BEGIN
     daily_upload_used,
     daily_upload_reset_at,
     lifetime_upload_used,
+    free_uploads_without_watermark,
+    qr_codes_generated,
     created_at,
     updated_at
   )
@@ -153,15 +269,21 @@ BEGIN
     0,
     NOW(),
     0,
+    10, -- Free users get 10 uploads without watermark
+    0,  -- Start with 0 QR codes generated
     NOW(),
     NOW()
   )
   ON CONFLICT (id) DO NOTHING;
   
+  -- Log successful user creation
+  RAISE NOTICE 'User profile created for: %', NEW.email;
+  
   RETURN NEW;
 EXCEPTION
   WHEN OTHERS THEN
-    RAISE WARNING 'Error creating user profile: %', SQLERRM;
+    -- Log the error but don't fail the auth signup
+    RAISE WARNING 'Error creating user profile for %: %', NEW.email, SQLERRM;
     RETURN NEW;
 END;
 $$;
@@ -185,16 +307,68 @@ CREATE TRIGGER on_auth_user_created
   EXECUTE FUNCTION public.handle_new_user();
 
 -- ============================================================================
--- STEP 6: Enable Row Level Security
+-- STEP 6: Migrate Existing Auth Users to Public Users Table
+-- ============================================================================
+
+-- Create missing user profiles for existing auth users
+INSERT INTO public.users (
+  id,
+  email,
+  subscription_tier,
+  trial_used,
+  daily_upload_used,
+  daily_upload_reset_at,
+  lifetime_upload_used,
+  free_uploads_without_watermark,
+  qr_codes_generated,
+  created_at,
+  updated_at
+)
+SELECT 
+  au.id,
+  au.email,
+  'free',
+  FALSE,
+  0,
+  NOW(),
+  0,
+  10, -- Free users get 10 uploads without watermark
+  0,  -- Start with 0 QR codes generated
+  au.created_at,
+  NOW()
+FROM auth.users au
+LEFT JOIN public.users pu ON au.id = pu.id
+WHERE pu.id IS NULL
+  AND au.email IS NOT NULL
+  AND au.email_confirmed_at IS NOT NULL; -- Only confirmed users
+
+-- Log the migration results
+DO $$
+DECLARE
+  migrated_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO migrated_count
+  FROM auth.users au
+  LEFT JOIN public.users pu ON au.id = pu.id
+  WHERE pu.id IS NOT NULL
+    AND au.email IS NOT NULL
+    AND au.email_confirmed_at IS NOT NULL;
+    
+  RAISE NOTICE '✅ Migrated % existing auth users to public.users table', migrated_count;
+END $$;
+
+-- ============================================================================
+-- STEP 7: Enable Row Level Security
 -- ============================================================================
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.uploaded_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.share_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.access_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.share_link_history ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
--- STEP 7: Create RLS Policies (Supporting Anonymous Uploads)
+-- STEP 8: Create RLS Policies (Supporting Anonymous Uploads)
 -- ============================================================================
 
 -- Users policies
@@ -260,6 +434,15 @@ DROP POLICY IF EXISTS "Users can delete own share links" ON public.share_links;
 CREATE POLICY "Users can delete own share links" ON public.share_links
   FOR DELETE USING (auth.uid() = user_id);
 
+-- Share link history policies
+DROP POLICY IF EXISTS "Users can view own share link history" ON public.share_link_history;
+CREATE POLICY "Users can view own share link history" ON public.share_link_history
+  FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "System can insert share link history" ON public.share_link_history;
+CREATE POLICY "System can insert share link history" ON public.share_link_history
+  FOR INSERT WITH CHECK (true);
+
 -- Access logs policies
 DROP POLICY IF EXISTS "Users can view access logs for own share links" ON public.access_logs;
 CREATE POLICY "Users can view access logs for own share links" ON public.access_logs
@@ -276,7 +459,7 @@ CREATE POLICY "Anyone can insert access logs" ON public.access_logs
   FOR INSERT WITH CHECK (true);
 
 -- ============================================================================
--- STEP 8: Grant Permissions
+-- STEP 9: Grant Permissions
 -- ============================================================================
 
 GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
@@ -292,7 +475,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.share_links TO authenticated, ano
 GRANT SELECT, INSERT ON public.access_logs TO authenticated, anon;
 
 -- ============================================================================
--- STEP 9: Initialize Existing Data
+-- STEP 10: Initialize Existing Data
 -- ============================================================================
 
 -- Initialize lifetime_upload_used for existing users
@@ -315,7 +498,8 @@ BEGIN
   RAISE NOTICE '✅ lifetime_upload_used column added (1GB limit for free users)';
   RAISE NOTICE '✅ Anonymous uploads enabled (user_id can be NULL)';
   RAISE NOTICE '✅ RLS policies configured for authenticated and anonymous users';
-  RAISE NOTICE '✅ Auto-signup trigger created';
+  RAISE NOTICE '✅ Auto-signup trigger created and tested';
+  RAISE NOTICE '✅ Existing auth users migrated to public.users table';
   RAISE NOTICE '✅ Indexes created for performance';
   RAISE NOTICE '';
   RAISE NOTICE '🚀 Your database is ready! Deploy your backend and test uploads.';
