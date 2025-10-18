@@ -86,10 +86,10 @@ router.post('/dodo/create-checkout', async (req, res) => {
     // Call Dodo Payments API to create checkout session
     logger.info('Calling Dodo Payments API', { 
       checkoutData,
-      apiUrl: 'https://api.dodopayments.com/checkouts'
+      apiUrl: 'https://live.dodopayments.com/checkouts'
     });
     
-    const dodoResponse = await fetch('https://api.dodopayments.com/checkouts', {
+    const dodoResponse = await fetch('https://live.dodopayments.com/checkouts', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.DODO_PAYMENTS_API_KEY}`,
