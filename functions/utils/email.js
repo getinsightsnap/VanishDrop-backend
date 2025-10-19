@@ -1,58 +1,22 @@
-import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Create reusable transporter
-const createTransporter = () => {
-  // Check if using Gmail or custom SMTP
-  if (process.env.EMAIL_SERVICE === 'gmail') {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD, // Use App Password for Gmail
-      },
-    });
-  }
-  
-  // Custom SMTP configuration - Use SSL/TLS from start for containerized environments
-  const smtpConfig = {
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT),
-    secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000, // 10 seconds
-    socketTimeout: 10000, // 10 seconds
-    tls: {
-      rejectUnauthorized: false // Allow self-signed certificates
-    }
-  };
-  
-  console.log('📧 SMTP Configuration:', {
-    host: smtpConfig.host,
-    port: smtpConfig.port,
-    secure: smtpConfig.secure,
-    user: smtpConfig.auth.user,
-    passwordSet: !!smtpConfig.auth.pass
-  });
-  
-  return nodemailer.createTransport(smtpConfig);
-};
+// Initialize SendGrid
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+// SendGrid is now the primary email service
+// No need for nodemailer transporter since we're using SendGrid SDK
 
 // Send share link notification email
 export const sendShareLinkEmail = async (recipientEmail, data) => {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.warn('Email credentials not configured. Skipping email notification.');
+  if (!process.env.SENDGRID_API_KEY) {
+    console.warn('SendGrid API key not configured. Skipping email notification.');
     return { success: false, message: 'Email not configured' };
   }
 
   try {
-    const transporter = createTransporter();
     const shareUrl = data.shareUrl;
     const filename = data.filename;
     const senderName = data.senderName || 'VanishDrop User';
@@ -138,31 +102,30 @@ export const sendShareLinkEmail = async (recipientEmail, data) => {
       </html>
     `;
 
-    const mailOptions = {
-      from: `"VanishDrop" <${process.env.EMAIL_USER}>`,
+    const msg = {
       to: recipientEmail,
+      from: process.env.EMAIL_FROM || 'noreply@vanishdrop.com',
       subject: `📁 ${senderName} shared "${filename}" with you`,
       html: htmlContent,
       text: `${senderName} shared a file with you via VanishDrop.\n\nFile: ${filename}\nExpires: ${expiresAt}\n${hasPassword ? 'Password Protected: Yes\n' : ''}\n\nDownload link: ${shareUrl}\n\nThis link will expire on ${expiresAt}.`,
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('Email sent successfully:', info.messageId);
-    return { success: true, messageId: info.messageId };
+    const response = await sgMail.send(msg);
+    console.log('Email sent successfully via SendGrid:', response[0].statusCode);
+    return { success: true, messageId: response[0].headers['x-message-id'] };
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Error sending email via SendGrid:', error);
     return { success: false, error: error.message };
   }
 };
 
 // Send file expiration reminder
 export const sendExpirationReminder = async (recipientEmail, data) => {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    return { success: false, message: 'Email not configured' };
+  if (!process.env.SENDGRID_API_KEY) {
+    return { success: false, message: 'SendGrid API key not configured' };
   }
 
   try {
-    const transporter = createTransporter();
     const filename = data.filename;
     const expiresAt = new Date(data.expiresAt).toLocaleString();
     const hoursLeft = data.hoursLeft || 24;
@@ -198,34 +161,31 @@ export const sendExpirationReminder = async (recipientEmail, data) => {
       </html>
     `;
 
-    const mailOptions = {
-      from: `"VanishDrop" <${process.env.EMAIL_USER}>`,
+    const msg = {
       to: recipientEmail,
+      from: process.env.EMAIL_FROM || 'noreply@vanishdrop.com',
       subject: `⏰ Your file "${filename}" expires in ${hoursLeft} hours`,
       html: htmlContent,
       text: `Your file "${filename}" will expire in ${hoursLeft} hours on ${expiresAt}. After this time, it will be permanently deleted.`,
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    return { success: true, messageId: info.messageId };
+    const response = await sgMail.send(msg);
+    return { success: true, messageId: response[0].headers['x-message-id'] };
   } catch (error) {
-    console.error('Error sending expiration reminder:', error);
+    console.error('Error sending expiration reminder via SendGrid:', error);
     return { success: false, error: error.message };
   }
 };
 
 // Send OTP email
 export const sendOTPEmail = async (recipientEmail, otp) => {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    return { success: false, message: 'Email not configured' };
+  if (!process.env.SENDGRID_API_KEY) {
+    return { success: false, message: 'SendGrid API key not configured' };
   }
 
   try {
-    console.log('📧 Creating email transporter...');
-    const transporter = createTransporter();
-    console.log('📧 Transporter created successfully');
-
-    console.log('📧 Preparing email content...');
+    console.log('📧 Preparing SendGrid email...');
+    
     const htmlContent = `
       <!DOCTYPE html>
       <html>
@@ -254,25 +214,24 @@ export const sendOTPEmail = async (recipientEmail, otp) => {
       </html>
     `;
 
-    const mailOptions = {
-      from: `"VanishDrop" <${process.env.EMAIL_USER}>`,
+    const msg = {
       to: recipientEmail,
+      from: process.env.EMAIL_FROM || 'noreply@vanishdrop.com',
       subject: `🔐 Your VanishDrop OTP: ${otp}`,
-      html: htmlContent,
       text: `Your VanishDrop OTP is: ${otp}\n\nThis code will expire in 10 minutes. Never share this code with anyone.`,
+      html: htmlContent,
     };
 
-    console.log('📧 Sending email...');
-    const info = await transporter.sendMail(mailOptions);
-    console.log('📧 Email sent successfully:', info.messageId);
-    return { success: true, messageId: info.messageId };
+    console.log('📧 Sending email via SendGrid...');
+    const response = await sgMail.send(msg);
+    console.log('📧 Email sent successfully via SendGrid:', response[0].statusCode);
+    return { success: true, messageId: response[0].headers['x-message-id'] };
   } catch (error) {
-    console.error('📧 Error sending OTP email:', error);
+    console.error('📧 Error sending OTP email via SendGrid:', error);
     console.error('📧 Error details:', {
       code: error.code,
-      command: error.command,
-      response: error.response,
-      message: error.message
+      message: error.message,
+      response: error.response?.body
     });
     return { success: false, error: error.message };
   }
