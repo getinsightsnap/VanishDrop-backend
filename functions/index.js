@@ -46,7 +46,9 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
+
+// IMPORTANT: Don't parse JSON globally - webhook routes need raw body for signature verification
+// Instead, we'll apply express.json() to specific routes that need it
 app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
@@ -154,7 +156,7 @@ app.get('/debug/routes', (req, res) => {
 });
 
 // Test upload endpoint (simplified)
-app.post('/debug/upload-test', async (req, res) => {
+app.post('/debug/upload-test', express.json(), async (req, res) => {
   try {
     res.json({
       status: 'Upload test endpoint working',
@@ -201,13 +203,14 @@ app.get('/debug/db', async (req, res) => {
   }
 });
 
-// API Routes
-app.use('/api/files', fileRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/share', shareRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/webhook', checkoutLimiter, webhookRoutes);
+// API Routes - Apply JSON parsing to all routes except webhooks
+// Webhooks need raw body for signature verification
+app.use('/api/files', express.json(), fileRoutes);
+app.use('/api/users', express.json(), userRoutes);
+app.use('/api/share', express.json(), shareRoutes);
+app.use('/api/admin', express.json(), adminRoutes);
+app.use('/api/analytics', express.json(), analyticsRoutes);
+app.use('/api/webhook', checkoutLimiter, webhookRoutes); // No express.json() - webhook route handles its own body parsing
 
 // Error handling middleware
 app.use((err, req, res, next) => {
