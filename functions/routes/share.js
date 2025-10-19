@@ -448,7 +448,9 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
     console.log(`Generated OTP for ${email}: ${otp} (identifier: ${identifier})`);
 
     // Send OTP via email
+    console.log(`📧 Attempting to send OTP email to: ${email}`);
     const emailResult = await sendOTPEmail(email, otp);
+    console.log(`📧 Email sending result:`, emailResult);
 
     if (!emailResult.success) {
       console.error('Failed to send OTP email:', emailResult);
