@@ -264,9 +264,149 @@ export const sendOTPEmail = async (recipientEmail, otp) => {
   }
 };
 
+// Send document request email to recipient
+export const sendDocumentRequestEmail = async (recipientEmail, requesterName, message, requestToken, deadline) => {
+  if (!sendGridAvailable) {
+    console.warn('SendGrid not available, skipping document request email');
+    return { success: false, message: 'SendGrid package not installed' };
+  }
+
+  const requestUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/fulfill/${requestToken}`;
+  const deadlineText = deadline ? `\nDeadline: ${new Date(deadline).toLocaleString()}` : '';
+
+  const msg = {
+    to: recipientEmail,
+    from: process.env.EMAIL_FROM || 'noreply@vanishdrop.com',
+    subject: `${requesterName} has requested a document from you`,
+    text: `
+Hello,
+
+${requesterName} has requested a document from you.
+
+Message:
+${message}
+${deadlineText}
+
+Please click the link below to upload the requested document:
+${requestUrl}
+
+If you don't have an account, you'll be prompted to create one.
+
+Best regards,
+VanishDrop Team
+    `,
+    html: `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <h2 style="color: #333;">Document Request</h2>
+  <p>Hello,</p>
+  <p><strong>${requesterName}</strong> has requested a document from you.</p>
+  
+  <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0;">
+    <p style="margin: 0;"><strong>Message:</strong></p>
+    <p style="margin: 10px 0 0 0;">${message}</p>
+    ${deadline ? `<p style="margin: 10px 0 0 0;"><strong>Deadline:</strong> ${new Date(deadline).toLocaleString()}</p>` : ''}
+  </div>
+  
+  <p>Please click the button below to upload the requested document:</p>
+  
+  <a href="${requestUrl}" style="display: inline-block; background: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0;">
+    Upload Document
+  </a>
+  
+  <p style="color: #666; font-size: 14px;">If you don't have an account, you'll be prompted to create one.</p>
+  
+  <p style="color: #999; font-size: 12px; margin-top: 30px;">
+    If the button doesn't work, copy and paste this link into your browser:<br>
+    ${requestUrl}
+  </p>
+  
+  <p>Best regards,<br>VanishDrop Team</p>
+</div>
+    `
+  };
+
+  try {
+    console.log('📧 Attempting to send document request email to:', recipientEmail);
+    console.log('📧 Preparing SendGrid email...');
+    console.log('📧 Sending email via SendGrid...');
+    
+    const response = await sgMail.send(msg);
+    
+    console.log('📧 Email sent successfully via SendGrid:', response[0].statusCode);
+    return { success: true, messageId: response[0].headers['x-message-id'] };
+  } catch (error) {
+    console.error('📧 Error sending document request email:', error);
+    console.error('📧 Error details:', {
+      code: error.code,
+      message: error.message,
+      response: error.response?.body
+    });
+    return { success: false, error: error.message };
+  }
+};
+
+// Send request fulfilled notification to requester
+export const sendRequestFulfilledEmail = async (requesterEmail, recipientName, shareToken) => {
+  if (!sendGridAvailable) {
+    console.warn('SendGrid not available, skipping fulfillment email');
+    return { success: false, message: 'SendGrid package not installed' };
+  }
+
+  const shareUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/share/${shareToken}`;
+
+  const msg = {
+    to: requesterEmail,
+    from: process.env.EMAIL_FROM || 'noreply@vanishdrop.com',
+    subject: 'Your document request has been fulfilled',
+    text: `
+Hello,
+
+Good news! ${recipientName} has uploaded the document you requested.
+
+You can now access the document here:
+${shareUrl}
+
+Best regards,
+VanishDrop Team
+    `,
+    html: `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <h2 style="color: #333;">✅ Document Request Fulfilled</h2>
+  <p>Hello,</p>
+  <p>Good news! <strong>${recipientName}</strong> has uploaded the document you requested.</p>
+  
+  <p>You can now access the document by clicking the button below:</p>
+  
+  <a href="${shareUrl}" style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0;">
+    View Document
+  </a>
+  
+  <p style="color: #999; font-size: 12px; margin-top: 30px;">
+    If the button doesn't work, copy and paste this link into your browser:<br>
+    ${shareUrl}
+  </p>
+  
+  <p>Best regards,<br>VanishDrop Team</p>
+</div>
+    `
+  };
+
+  try {
+    console.log('📧 Sending fulfillment notification to:', requesterEmail);
+    const response = await sgMail.send(msg);
+    console.log('📧 Fulfillment email sent successfully:', response[0].statusCode);
+    return { success: true, messageId: response[0].headers['x-message-id'] };
+  } catch (error) {
+    console.error('📧 Error sending fulfillment email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 export default {
   sendShareLinkEmail,
   sendExpirationReminder,
   sendOTPEmail,
+  sendDocumentRequestEmail,
+  sendRequestFulfilledEmail,
 };
 
