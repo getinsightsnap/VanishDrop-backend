@@ -3,7 +3,6 @@ import { supabaseAdmin } from '../../config/supabase.js';
 import logger from '../utils/logger.js';
 import DodoPayments from 'dodopayments';
 import { Webhook } from 'standardwebhooks';
-import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -16,42 +15,8 @@ const dodoClient = new DodoPayments({
 const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
 let webhookVerifier = null;
 
-// Custom webhook verification function for Dodo Payments
-function verifyDodoWebhookSignature(payload, signature, secret, timestamp) {
-  try {
-    // Dodo Payments uses HMAC-SHA256 with specific format
-    // Signature format: v1,<base64_signature>
-    if (!signature.startsWith('v1,')) {
-      throw new Error('Invalid signature format - must start with v1,');
-    }
-    
-    const actualSignature = signature.substring(3); // Remove 'v1,' prefix
-    
-    // Create the payload to sign: timestamp + payload
-    const payloadToSign = timestamp + payload;
-    
-    // Create HMAC-SHA256 signature
-    const hmac = crypto.createHmac('sha256', secret);
-    hmac.update(payloadToSign, 'utf8');
-    const expectedSignature = hmac.digest('base64');
-    
-    // Compare signatures using timing-safe comparison
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(actualSignature, 'base64'),
-      Buffer.from(expectedSignature, 'base64')
-    );
-    
-    if (!isValid) {
-      throw new Error('Signature verification failed');
-    }
-    
-    return true;
-  } catch (error) {
-    throw new Error(`Webhook verification failed: ${error.message}`);
-  }
-}
-
 // Only initialize webhook verifier if we have a valid secret
+// Dodo Payments follows Standard Webhooks specification
 if (webhookSecret && 
     webhookSecret !== 'your_dodo_payments_webhook_secret_here' && 
     webhookSecret.startsWith('whsec_')) {
@@ -59,12 +24,12 @@ if (webhookSecret &&
     // Remove whsec_ prefix for standardwebhooks library
     const cleanSecret = webhookSecret.substring(6); // Remove 'whsec_' (6 characters)
     webhookVerifier = new Webhook(cleanSecret);
-    console.log('✅ Webhook verifier initialized successfully with clean secret');
+    logger.info('✅ Webhook verifier initialized successfully');
   } catch (error) {
-    console.warn('⚠️ Invalid webhook secret format, webhook verification disabled:', error.message);
+    logger.warn('⚠️ Invalid webhook secret format, webhook verification disabled:', error.message);
   }
 } else {
-  console.warn('⚠️ No valid webhook secret configured (must start with whsec_), webhook verification disabled');
+  logger.warn('⚠️ No valid webhook secret configured (must start with whsec_), webhook verification disabled');
 }
 
 // Health check endpoint
@@ -222,29 +187,36 @@ router.post('/dodo', express.raw({ type: 'application/json' }), async (req, res)
       url: req.url
     });
 
-    // Verify webhook using custom Dodo Payments verification
+    // Verify webhook signature using Standard Webhooks library
+    // Dodo Payments follows the Standard Webhooks specification
+    const webhookId = req.headers['webhook-id'] || '';
     const signature = req.headers['webhook-signature'] || '';
     const timestamp = req.headers['webhook-timestamp'] || '';
-    const webhookId = req.headers['webhook-id'] || '';
     
     logger.info('🔍 Attempting webhook verification', {
       webhookId,
-      signature: signature.substring(0, 20) + '...',
+      hasSignature: !!signature,
       timestamp,
       bodyLength: rawBody.length
     });
     
-    if (webhookSecret && webhookSecret.startsWith('whsec_')) {
+    if (webhookVerifier) {
       try {
-        // Use custom Dodo Payments verification
-        const cleanSecret = webhookSecret.substring(6); // Remove 'whsec_' prefix
-        verifyDodoWebhookSignature(rawBody, signature, cleanSecret, timestamp);
+        // Construct webhook headers as required by Standard Webhooks
+        const webhookHeaders = {
+          'webhook-id': webhookId,
+          'webhook-signature': signature,
+          'webhook-timestamp': timestamp
+        };
+        
+        // Verify the webhook using the Standard Webhooks library
+        // This follows Dodo Payments specification: webhook-id.webhook-timestamp.payload
+        await webhookVerifier.verify(rawBody, webhookHeaders);
         logger.info('✅ Webhook signature verified successfully - webhook is from Dodo Payments');
       } catch (verificationError) {
         logger.error('❌ Webhook verification failed', { 
           error: verificationError.message,
           webhookId,
-          signature: signature.substring(0, 20) + '...',
           timestamp,
           bodyLength: rawBody.length
         });
