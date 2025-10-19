@@ -118,7 +118,12 @@ router.post('/dodo/create-checkout', express.json(), async (req, res) => {
       product_cart: [
         { 
           product_id: productId, 
-          quantity: 1 
+          quantity: 1,
+          // Try adding metadata at product level as well
+          metadata: {
+            user_id: userId,
+            source: 'vanishdrop_webapp'
+          }
         }
       ],
       feature_flags: {
@@ -130,6 +135,7 @@ router.post('/dodo/create-checkout', express.json(), async (req, res) => {
         name: userEmail.split('@')[0], // Extract name from email
       },
       billing: billing,
+      // Metadata at checkout session level
       metadata: {
         user_id: userId,
         source: 'vanishdrop_webapp'
@@ -141,6 +147,13 @@ router.post('/dodo/create-checkout', express.json(), async (req, res) => {
       checkoutPayload.discount_code = discountCode;
       logger.info('Applying discount code', { discountCode });
     }
+    
+    // Log the complete payload being sent to Dodo Payments
+    logger.info('📤 Sending checkout payload to Dodo Payments', { 
+      payload: JSON.stringify(checkoutPayload, null, 2),
+      userId,
+      userEmail
+    });
     
     const checkoutResponse = await dodoClient.checkoutSessions.create(checkoutPayload);
     
@@ -378,7 +391,10 @@ async function handleSubscriptionActivated(payload, subscriptionData, res) {
       customerEmail, 
       userId, 
       eventType,
-      subscriptionId: subscriptionData?.subscription_id
+      subscriptionId: subscriptionData?.subscription_id,
+      metadata: JSON.stringify(metadata),
+      hasMetadata: !!metadata,
+      metadataKeys: Object.keys(metadata || {})
     });
     
     // Check if we have user_id in metadata (preferred method)
@@ -573,12 +589,82 @@ async function handleSubscriptionRenewed(payload, subscriptionData, res) {
 
 // Handle payment success (one-time payments)
 async function handlePaymentSuccess(payload, paymentData, res) {
-  const eventType = payload.type;
-  const metadata = paymentData?.metadata || payload.data?.metadata || {};
-  const userId = metadata.user_id;
-  
-  logger.info('💰 One-time payment succeeded', { eventType, userId });
-  res.json({ success: true, message: `One-time payment succeeded for user ${userId || 'unknown'}` });
+  try {
+    const eventType = payload.type;
+    const metadata = paymentData?.metadata || payload.data?.metadata || {};
+    const userId = metadata.user_id;
+    const customerEmail = paymentData?.customer?.email || payload.data?.customer?.email;
+    
+    logger.info('💰 One-time payment succeeded', { 
+      eventType, 
+      userId, 
+      customerEmail,
+      paymentId: paymentData?.payment_id || payload.data?.payment_id
+    });
+    
+    // If we have user_id in metadata, upgrade the user to Pro
+    if (userId) {
+      logger.info('✅ Found user_id in metadata, upgrading user to Pro', { userId });
+      
+      const { error: updateError } = await supabaseAdmin
+        .from('users')
+        .update({
+          subscription_tier: 'pro',
+          upgraded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        logger.error('❌ Failed to upgrade user to Pro', { error: updateError, userId });
+        throw updateError;
+      }
+
+      logger.info('🎉 Successfully upgraded user to Pro via one-time payment', { userId, eventType });
+      res.json({ success: true, message: `User ${userId} upgraded to Pro (one-time payment)` });
+      return;
+    }
+    
+    // Fallback: Find user by email if no user_id in metadata
+    if (customerEmail) {
+      logger.info('No user_id in metadata, trying to find user by email', { customerEmail });
+      
+      const { data: userData, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('id, email')
+        .ilike('email', customerEmail)
+        .single();
+        
+      if (!userError && userData) {
+        const foundUserId = userData.id;
+        
+        const { error: updateError } = await supabaseAdmin
+          .from('users')
+          .update({
+            subscription_tier: 'pro',
+            upgraded_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', foundUserId);
+
+        if (updateError) {
+          logger.error('❌ Failed to upgrade user to Pro', { error: updateError, userId: foundUserId });
+          throw updateError;
+        }
+
+        logger.info('🎉 Successfully upgraded user to Pro via one-time payment', { userId: foundUserId, eventType });
+        res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (one-time payment)` });
+        return;
+      }
+    }
+    
+    logger.warn('⚠️ User not found for one-time payment', { customerEmail, userId });
+    res.json({ success: true, message: 'Payment processed but user not found' });
+    
+  } catch (error) {
+    logger.error('Error handling payment success', { error: error.message, payload });
+    throw error;
+  }
 }
 
 // Handle failed payments
