@@ -403,7 +403,7 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
     const { email } = req.body;
 
     console.log(`🔍 OTP Request - Token: ${token}, Email: ${email}`);
-    console.log(`🔍 Environment check - EMAIL_USER: ${process.env.EMAIL_USER ? 'SET' : 'NOT SET'}, EMAIL_PASSWORD: ${process.env.EMAIL_PASSWORD ? 'SET' : 'NOT SET'}`);
+    console.log(`🔍 Environment check - SENDGRID_API_KEY: ${process.env.SENDGRID_API_KEY ? 'SET' : 'NOT SET'}`);
 
     if (!email) {
       console.log('❌ No email provided in request');
@@ -457,8 +457,8 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
       console.log(`⚠️ Email sending failed but OTP generated: ${otp}`);
       
       // Check if email is configured
-      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-        console.error('❌ EMAIL_USER or EMAIL_PASSWORD not configured in environment variables');
+      if (!process.env.SENDGRID_API_KEY) {
+        console.error('❌ SENDGRID_API_KEY not configured in environment variables');
         console.log(`🔑 For testing purposes, OTP is: ${otp}`);
         
         // Return success with OTP for testing (remove in production)
