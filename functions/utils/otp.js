@@ -32,9 +32,15 @@ export const storeOTP = (identifier, otp) => {
 
 // Verify OTP
 export const verifyOTP = (identifier, inputOTP) => {
+  console.log(`🔍 OTP Verification - Looking for identifier: ${identifier}`);
+  console.log(`🔍 OTP Storage keys:`, Array.from(otpStorage.keys()));
+  console.log(`🔍 OTP Storage size:`, otpStorage.size);
+  
   const stored = otpStorage.get(identifier);
+  console.log(`🔍 Found stored OTP:`, stored);
   
   if (!stored) {
+    console.log(`❌ No OTP found for identifier: ${identifier}`);
     return {
       valid: false,
       error: 'OTP not found or expired'
