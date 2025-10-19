@@ -134,6 +134,7 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
       max_opens,
       password,
       require_otp,
+      otp_email,
       qr_code_enabled
     } = req.body;
 
@@ -207,6 +208,7 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
         max_opens,
         password_hash,
         require_otp,
+        otp_email,
         qr_code_enabled,
         has_watermark: shouldApplyWatermark,
         download_allowed
@@ -340,6 +342,7 @@ router.get('/:token', async (req, res) => {
         password_hash: undefined,
         has_password: !!data.password_hash,
         has_watermark: data.has_watermark || false,
+        otp_email: data.otp_email,
         uploaded_files: data.password_hash ? {
           id: data.uploaded_files.id,
           filename: data.uploaded_files.filename,
