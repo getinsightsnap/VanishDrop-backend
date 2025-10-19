@@ -452,19 +452,30 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
 
     if (!emailResult.success) {
       console.error('Failed to send OTP email:', emailResult);
-      // Still return success to user but log the OTP for debugging
       console.log(`⚠️ Email sending failed but OTP generated: ${otp}`);
       
       // Check if email is configured
       if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
         console.error('❌ EMAIL_USER or EMAIL_PASSWORD not configured in environment variables');
-        return res.status(500).json({ 
-          error: 'Email service not configured. Please contact administrator.',
-          debug: process.env.NODE_ENV === 'development' ? `OTP: ${otp}` : undefined
+        console.log(`🔑 For testing purposes, OTP is: ${otp}`);
+        
+        // Return success with OTP for testing (remove in production)
+        return res.json({
+          message: 'OTP generated (email not configured)',
+          otp: otp, // Only for testing - remove in production
+          expiresIn: 600,
+          warning: 'Email service not configured'
         });
       }
       
-      return res.status(500).json({ error: 'Failed to send OTP email' });
+      // Email is configured but sending failed - still return OTP for testing
+      console.log(`🔑 Email configured but sending failed. OTP is: ${otp}`);
+      return res.json({
+        message: 'OTP generated (email sending failed)',
+        otp: otp, // Only for testing - remove in production
+        expiresIn: 600,
+        warning: 'Email sending failed but OTP is available'
+      });
     }
 
     console.log(`✅ OTP sent successfully to ${email}`);
