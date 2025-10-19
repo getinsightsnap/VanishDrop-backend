@@ -114,16 +114,14 @@ router.post('/dodo/create-checkout', express.json(), async (req, res) => {
     logger.info('Creating subscription with SDK', { userId, userEmail, hasBillingInfo: !!billingInfo });
     
     // Create checkout session with discount code support using Dodo Payments SDK
+    // IMPORTANT: Metadata must be at checkout session level only (not in product_cart)
+    // All metadata values MUST be strings (per Dodo Payments TypeScript definition)
     const checkoutPayload = {
       product_cart: [
         { 
           product_id: productId, 
-          quantity: 1,
-          // Try adding metadata at product level as well
-          metadata: {
-            user_id: userId,
-            source: 'vanishdrop_webapp'
-          }
+          quantity: 1
+          // NOTE: product_cart items do NOT support metadata field
         }
       ],
       feature_flags: {
@@ -134,11 +132,14 @@ router.post('/dodo/create-checkout', express.json(), async (req, res) => {
         email: userEmail,
         name: userEmail.split('@')[0], // Extract name from email
       },
-      billing: billing,
-      // Metadata at checkout session level
+      billing_address: billing, // Note: Using billing_address (correct API field name)
+      // Metadata at checkout session level (only place it's supported)
+      // Must be string key-value pairs only
       metadata: {
-        user_id: userId,
-        source: 'vanishdrop_webapp'
+        user_id: userId,  // Ensure this is a string
+        user_email: userEmail,  // Add email as backup
+        source: 'vanishdrop_webapp',
+        timestamp: new Date().toISOString()
       }
     };
     
