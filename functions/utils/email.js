@@ -221,8 +221,11 @@ export const sendOTPEmail = async (recipientEmail, otp) => {
   }
 
   try {
+    console.log('📧 Creating email transporter...');
     const transporter = createTransporter();
+    console.log('📧 Transporter created successfully');
 
+    console.log('📧 Preparing email content...');
     const htmlContent = `
       <!DOCTYPE html>
       <html>
@@ -259,10 +262,18 @@ export const sendOTPEmail = async (recipientEmail, otp) => {
       text: `Your VanishDrop OTP is: ${otp}\n\nThis code will expire in 10 minutes. Never share this code with anyone.`,
     };
 
+    console.log('📧 Sending email...');
     const info = await transporter.sendMail(mailOptions);
+    console.log('📧 Email sent successfully:', info.messageId);
     return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error('Error sending OTP email:', error);
+    console.error('📧 Error sending OTP email:', error);
+    console.error('📧 Error details:', {
+      code: error.code,
+      command: error.command,
+      response: error.response,
+      message: error.message
+    });
     return { success: false, error: error.message };
   }
 };
