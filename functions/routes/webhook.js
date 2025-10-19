@@ -77,7 +77,8 @@ router.get('/dodo/test', async (req, res) => {
 });
 
 // Create Dodo Payments subscription checkout using official SDK pattern
-router.post('/dodo/create-checkout', async (req, res) => {
+// This route needs express.json() to parse the request body
+router.post('/dodo/create-checkout', express.json(), async (req, res) => {
   try {
     logger.info('Checkout endpoint hit', { 
       body: req.body, 
