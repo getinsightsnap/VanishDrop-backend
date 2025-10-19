@@ -404,6 +404,7 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
 
     console.log(`🔍 OTP Request - Token: ${token}, Email: ${email}`);
     console.log(`🔍 Environment check - SENDGRID_API_KEY: ${process.env.SENDGRID_API_KEY ? 'SET' : 'NOT SET'}`);
+    console.log(`🔍 SendGrid API Key length: ${process.env.SENDGRID_API_KEY?.length || 0}`);
 
     if (!email) {
       console.log('❌ No email provided in request');
