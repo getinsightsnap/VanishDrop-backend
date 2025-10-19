@@ -402,11 +402,16 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
     const { token } = req.params;
     const { email } = req.body;
 
+    console.log(`🔍 OTP Request - Token: ${token}, Email: ${email}`);
+    console.log(`🔍 Environment check - EMAIL_USER: ${process.env.EMAIL_USER ? 'SET' : 'NOT SET'}, EMAIL_PASSWORD: ${process.env.EMAIL_PASSWORD ? 'SET' : 'NOT SET'}`);
+
     if (!email) {
+      console.log('❌ No email provided in request');
       return res.status(400).json({ error: 'Email is required' });
     }
 
     // Check if share link exists and requires OTP
+    console.log(`🔍 Checking share link for token: ${token}`);
     const { data: linkData, error: linkError } = await supabaseAdmin
       .from('share_links')
       .select('id, require_otp, expires_at')
@@ -414,15 +419,24 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
       .single();
 
     if (linkError || !linkData) {
+      console.log(`❌ Share link not found - Error: ${linkError?.message || 'No data'}`);
       return res.status(404).json({ error: 'Share link not found' });
     }
 
+    console.log(`✅ Share link found - ID: ${linkData.id}, require_otp: ${linkData.require_otp}, expires_at: ${linkData.expires_at}`);
+
     if (!linkData.require_otp) {
+      console.log('❌ Share link does not require OTP');
       return res.status(400).json({ error: 'This share link does not require OTP' });
     }
 
     // Check if expired
-    if (new Date(linkData.expires_at) < new Date()) {
+    const now = new Date();
+    const expiresAt = new Date(linkData.expires_at);
+    console.log(`🔍 Checking expiration - Now: ${now.toISOString()}, Expires: ${expiresAt.toISOString()}`);
+    
+    if (expiresAt < now) {
+      console.log('❌ Share link has expired');
       return res.status(410).json({ error: 'Share link expired' });
     }
 
