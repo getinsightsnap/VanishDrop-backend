@@ -17,7 +17,7 @@ const createTransporter = () => {
   }
   
   // Custom SMTP configuration
-  return nodemailer.createTransport({
+  const smtpConfig = {
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.SMTP_PORT) || 587,
     secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
@@ -25,7 +25,23 @@ const createTransporter = () => {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASSWORD,
     },
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 10000, // 10 seconds
+    socketTimeout: 10000, // 10 seconds
+    tls: {
+      rejectUnauthorized: false // Allow self-signed certificates
+    }
+  };
+  
+  console.log('📧 SMTP Configuration:', {
+    host: smtpConfig.host,
+    port: smtpConfig.port,
+    secure: smtpConfig.secure,
+    user: smtpConfig.auth.user,
+    passwordSet: !!smtpConfig.auth.pass
   });
+  
+  return nodemailer.createTransport(smtpConfig);
 };
 
 // Send share link notification email
