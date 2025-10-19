@@ -1,13 +1,14 @@
 {
   "name": "vanishdrop-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "VanishDrop Backend API with Supabase",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "dev": "node --watch functions/index.js",
     "start": "node functions/index.js",
-    "deploy": "supabase functions deploy"
+    "deploy": "supabase functions deploy",
+    "postinstall": "echo 'Dependencies installed successfully'"
   },
   "keywords": [
     "file-sharing",
@@ -17,6 +18,7 @@
   "author": "VanishDrop",
   "license": "MIT",
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "@supabase/supabase-js": "^2.39.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
@@ -27,7 +29,6 @@
     "express-validator": "^7.0.1",
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
-    "nodemailer": "^6.9.7",
     "otplib": "^12.0.1",
     "qrcode": "^1.5.3",
     "sharp": "^0.33.1",
