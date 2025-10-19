@@ -447,6 +447,7 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
     storeOTP(identifier, otp);
 
     console.log(`Generated OTP for ${email}: ${otp} (identifier: ${identifier})`);
+    console.log(`🔍 OTP stored with identifier: ${identifier}`);
 
     // Send OTP via email
     console.log(`📧 Attempting to send OTP email to: ${email}`);
@@ -507,7 +508,10 @@ router.post('/:token/verify-otp', shareLimiter, validateOTP, async (req, res) =>
     }
 
     const identifier = `${token}:${email}`;
+    console.log(`🔍 Verifying OTP - Identifier: ${identifier}, OTP: ${otp}`);
+    
     const verification = verifyOTP(identifier, otp);
+    console.log(`🔍 Verification result:`, verification);
 
     if (!verification.valid) {
       return res.status(401).json({
