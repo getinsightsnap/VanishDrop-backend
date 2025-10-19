@@ -16,14 +16,14 @@ const createTransporter = () => {
     });
   }
   
-  // Custom SMTP configuration
+  // Custom SMTP configuration - Use SSL/TLS from start for containerized environments
   const smtpConfig = {
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT) || 587,
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT),
     secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
     auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD,
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
     },
     connectionTimeout: 10000, // 10 seconds
     greetingTimeout: 10000, // 10 seconds
