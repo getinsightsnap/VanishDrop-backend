@@ -1,16 +1,33 @@
-import sgMail from '@sendgrid/mail';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Initialize SendGrid
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+// Dynamic import for SendGrid to handle missing package gracefully
+let sgMail = null;
+let sendGridAvailable = false;
+
+try {
+  const sendGridModule = await import('@sendgrid/mail');
+  sgMail = sendGridModule.default;
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  sendGridAvailable = true;
+  console.log('✅ SendGrid package loaded successfully');
+} catch (error) {
+  console.error('❌ SendGrid package not available:', error.message);
+  console.log('📧 Email functionality will be limited until SendGrid is installed');
+}
 
 // SendGrid is now the primary email service
 // No need for nodemailer transporter since we're using SendGrid SDK
+// Railway will install @sendgrid/mail package automatically
 
 // Send share link notification email
 export const sendShareLinkEmail = async (recipientEmail, data) => {
+  if (!sendGridAvailable) {
+    console.warn('SendGrid package not available. Skipping email notification.');
+    return { success: false, message: 'SendGrid package not installed' };
+  }
+  
   if (!process.env.SENDGRID_API_KEY) {
     console.warn('SendGrid API key not configured. Skipping email notification.');
     return { success: false, message: 'Email not configured' };
@@ -121,6 +138,11 @@ export const sendShareLinkEmail = async (recipientEmail, data) => {
 
 // Send file expiration reminder
 export const sendExpirationReminder = async (recipientEmail, data) => {
+  if (!sendGridAvailable) {
+    console.warn('SendGrid package not available. Skipping email notification.');
+    return { success: false, message: 'SendGrid package not installed' };
+  }
+  
   if (!process.env.SENDGRID_API_KEY) {
     return { success: false, message: 'SendGrid API key not configured' };
   }
@@ -179,6 +201,11 @@ export const sendExpirationReminder = async (recipientEmail, data) => {
 
 // Send OTP email
 export const sendOTPEmail = async (recipientEmail, otp) => {
+  if (!sendGridAvailable) {
+    console.warn('SendGrid package not available. Skipping OTP email.');
+    return { success: false, message: 'SendGrid package not installed' };
+  }
+  
   if (!process.env.SENDGRID_API_KEY) {
     return { success: false, message: 'SendGrid API key not configured' };
   }
