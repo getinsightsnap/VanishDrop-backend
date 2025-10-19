@@ -64,7 +64,9 @@ export const verifyOTP = (identifier, inputOTP) => {
   
   // Verify OTP
   if (stored.otp === inputOTP) {
-    otpStorage.delete(identifier); // Remove after successful verification
+    // Mark as verified but don't delete yet (will be deleted after file access)
+    stored.verified = true;
+    stored.verifiedAt = Date.now();
     return {
       valid: true,
       error: null
@@ -76,6 +78,33 @@ export const verifyOTP = (identifier, inputOTP) => {
     error: 'Invalid OTP',
     attemptsLeft: 3 - stored.attempts
   };
+};
+
+// Check if OTP was already verified and is still valid
+export const isOTPVerified = (identifier) => {
+  const stored = otpStorage.get(identifier);
+  
+  if (!stored) {
+    return { verified: false, error: 'OTP not found or expired' };
+  }
+  
+  // Check if expired
+  if (Date.now() > stored.expiresAt) {
+    otpStorage.delete(identifier);
+    return { verified: false, error: 'OTP has expired' };
+  }
+  
+  // Check if it was verified
+  if (stored.verified) {
+    return { verified: true, error: null };
+  }
+  
+  return { verified: false, error: 'OTP not verified yet' };
+};
+
+// Delete OTP after successful file access
+export const deleteOTP = (identifier) => {
+  otpStorage.delete(identifier);
 };
 
 // Get OTP info (for debugging, remove in production)
@@ -90,6 +119,7 @@ export const getOTPInfo = (identifier) => {
     exists: true,
     expiresAt: new Date(stored.expiresAt),
     attempts: stored.attempts,
+    verified: stored.verified || false,
     timeLeft: Math.max(0, Math.floor((stored.expiresAt - Date.now()) / 1000))
   };
 };
