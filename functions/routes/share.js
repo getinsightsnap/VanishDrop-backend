@@ -4,7 +4,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { shareLimiter, passwordLimiter } from '../middleware/rateLimiter.js';
 import { validateShareLink, validateShareAccess, validatePassword, validateUUID, validateOTP } from '../middleware/validators.js';
 import { sendShareLinkEmail, sendOTPEmail } from '../utils/email.js';
-import { generateOTP, storeOTP, verifyOTP } from '../utils/otp.js';
+import { generateOTP, storeOTP, verifyOTP, isOTPVerified, deleteOTP } from '../utils/otp.js';
 import logger, { logShareLinkCreated, logFileAccess } from '../utils/logger.js';
 import bcrypt from 'bcrypt';
 import QRCode from 'qrcode';
@@ -605,20 +605,34 @@ router.post('/:token/access', shareLimiter, validateShareAccess, async (req, res
       }
 
       const identifier = `${token}:${email}`;
-      const verification = verifyOTP(identifier, otp);
+      
+      // Check if OTP was already verified (from the verify-otp endpoint)
+      const verificationStatus = isOTPVerified(identifier);
+      
+      if (verificationStatus.verified) {
+        // OTP was already verified, allow access and delete the OTP
+        console.log('✅ OTP already verified, allowing access and cleaning up');
+        deleteOTP(identifier);
+      } else {
+        // OTP not verified yet, try to verify it now
+        const verification = verifyOTP(identifier, otp);
 
-      if (!verification.valid) {
-        await supabaseAdmin
-          .from('access_logs')
-          .insert({
-            share_link_id: linkData.id,
-            ip_address: ip_address || 'unknown',
-            success: false
+        if (!verification.valid) {
+          await supabaseAdmin
+            .from('access_logs')
+            .insert({
+              share_link_id: linkData.id,
+              ip_address: ip_address || 'unknown',
+              success: false
+            });
+          return res.status(401).json({
+            error: verification.error,
+            attemptsLeft: verification.attemptsLeft
           });
-        return res.status(401).json({
-          error: verification.error,
-          attemptsLeft: verification.attemptsLeft
-        });
+        }
+        
+        // Delete OTP after successful verification
+        deleteOTP(identifier);
       }
     }
 
