@@ -12,7 +12,7 @@ const generateRequestToken = () => {
   return crypto.randomBytes(16).toString('hex');
 };
 
-// Create new document request (Pro users only)
+// Create new document request (Free users: 3 lifetime, Pro users: unlimited)
 router.post('/create', authMiddleware, shareLimiter, async (req, res) => {
   try {
     const { recipient_email, request_message, upload_deadline } = req.body;
