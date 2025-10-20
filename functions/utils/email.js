@@ -271,7 +271,7 @@ export const sendDocumentRequestEmail = async (recipientEmail, requesterName, me
     return { success: false, message: 'SendGrid package not installed' };
   }
 
-  const requestUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/fulfill/${requestToken}`;
+  const requestUrl = `${process.env.FRONTEND_URL || 'https://vanishdrop.com'}/fulfill/${requestToken}`;
   const deadlineText = deadline ? `\nDeadline: ${new Date(deadline).toLocaleString()}` : '';
 
   const msg = {
