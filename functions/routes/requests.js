@@ -58,6 +58,7 @@ router.post('/create', authMiddleware, shareLimiter, async (req, res) => {
 
     // Generate unique request token
     const request_token = generateRequestToken();
+    console.log('🔑 Generated request token:', request_token);
 
     // Create document request
     const { data: request, error: requestError } = await supabaseAdmin
@@ -115,6 +116,7 @@ router.post('/create', authMiddleware, shareLimiter, async (req, res) => {
 router.get('/:token', async (req, res) => {
   try {
     const { token } = req.params;
+    console.log('🔍 Looking for request with token:', token);
 
     const { data: request, error } = await supabaseAdmin
       .from('document_requests')
@@ -125,7 +127,10 @@ router.get('/:token', async (req, res) => {
       .eq('request_token', token)
       .single();
 
+    console.log('🔍 Database query result:', { request, error });
+
     if (error || !request) {
+      console.log('❌ Request not found for token:', token);
       return res.status(404).json({ error: 'Request not found' });
     }
 
