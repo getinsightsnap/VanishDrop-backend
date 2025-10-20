@@ -146,7 +146,7 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       return res.status(400).json({ error: 'No file provided' });
     }
 
-    const { expires_in_hours } = req.body;
+    const { expires_in_hours, is_encrypted, encryption_iv, original_filename, original_file_type } = req.body;
     const user_id = req.user.id;
     const file = req.file;
 
@@ -307,11 +307,15 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       .from('uploaded_files')
       .insert({
         user_id,
-        filename: file.originalname,
+        filename: is_encrypted === 'true' ? original_filename : file.originalname,
         file_size: file.size,
-        file_type: file.mimetype,
+        file_type: is_encrypted === 'true' ? original_file_type : file.mimetype,
         file_url: publicUrl,
-        expires_at: expiresAt.toISOString()
+        expires_at: expiresAt.toISOString(),
+        is_encrypted: is_encrypted === 'true',
+        encryption_iv: is_encrypted === 'true' ? encryption_iv : null,
+        original_filename: is_encrypted === 'true' ? original_filename : null,
+        original_file_type: is_encrypted === 'true' ? original_file_type : null
       })
       .select()
       .single();
