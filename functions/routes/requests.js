@@ -113,17 +113,14 @@ router.post('/create', authMiddleware, shareLimiter, async (req, res) => {
 });
 
 // Get request details by token (public)
-router.get('/:token', async (req, res) => {
+router.get('/:token', async (req, res) => { 
   try {
     const { token } = req.params;
     console.log('🔍 Looking for request with token:', token);
 
     const { data: request, error } = await supabaseAdmin
       .from('document_requests')
-      .select(`
-        *,
-        requester:users!requester_id(email)
-      `)
+      .select('*')
       .eq('request_token', token)
       .single();
 
@@ -145,10 +142,17 @@ router.get('/:token', async (req, res) => {
       request.status = 'expired';
     }
 
+    // Get requester email separately
+    const { data: requester, error: requesterError } = await supabaseAdmin
+      .from('users')
+      .select('email')
+      .eq('id', request.requester_id)
+      .single();
+
     res.json({
       request: {
         id: request.id,
-        requester_email: request.requester.email,
+        requester_email: requester?.email || 'Unknown',
         recipient_email: request.recipient_email,
         request_message: request.request_message,
         status: request.status,
