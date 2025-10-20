@@ -71,8 +71,17 @@ router.post('/anonymous-upload', uploadLimiter, upload.single('file'), validateF
       .getPublicUrl(filePath);
 
     // Calculate expiration
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + (parseFloat(expires_in_hours) || 24));
+    // If expires_in_hours is 0, set expiresAt to null (no expiry)
+    const hoursToExpire = parseFloat(expires_in_hours);
+    let expiresAt = null;
+    
+    if (hoursToExpire === 0) {
+      // No expiry
+      expiresAt = null;
+    } else {
+      expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + (hoursToExpire || 24));
+    }
 
     // Save file metadata to database (without user_id)
     const { data: fileRecord, error: dbError } = await supabaseAdmin
@@ -281,9 +290,17 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       .getPublicUrl(filePath);
 
     // Calculate expiration time
-    const hoursToExpire = parseInt(expires_in_hours) || 24;
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + hoursToExpire);
+    // If expires_in_hours is 0, set expiresAt to null (no expiry for Pro users)
+    const hoursToExpire = parseInt(expires_in_hours);
+    let expiresAt = null;
+    
+    if (hoursToExpire === 0) {
+      // No expiry - only for Pro users
+      expiresAt = null;
+    } else {
+      expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + (hoursToExpire || 24));
+    }
 
     // Generate thumbnail if it's an image
     let thumbnailUrl = null;
