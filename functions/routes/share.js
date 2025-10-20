@@ -347,9 +347,15 @@ router.get('/:token', async (req, res) => {
           id: data.uploaded_files.id,
           filename: data.uploaded_files.filename,
           file_size: data.uploaded_files.file_size,
-          file_type: data.uploaded_files.file_type
+          file_type: data.uploaded_files.file_type,
+          is_encrypted: data.uploaded_files.is_encrypted,
+          encryption_iv: data.uploaded_files.encryption_iv
           // Don't send file_url until password is verified
-        } : data.uploaded_files
+        } : {
+          ...data.uploaded_files,
+          is_encrypted: data.uploaded_files.is_encrypted,
+          encryption_iv: data.uploaded_files.encryption_iv
+        }
       }
     });
   } catch (error) {
