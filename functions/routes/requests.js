@@ -80,6 +80,7 @@ router.post('/create', authMiddleware, shareLimiter, async (req, res) => {
     }
 
     // Send email to recipient
+    let emailSent = false;
     try {
       const requesterName = user.email.split('@')[0]; // Use email username as name
       await sendDocumentRequestEmail(
@@ -89,6 +90,16 @@ router.post('/create', authMiddleware, shareLimiter, async (req, res) => {
         request_token,
         upload_deadline
       );
+      emailSent = true;
+      
+      // Update email_sent status
+      await supabaseAdmin
+        .from('document_requests')
+        .update({ 
+          email_sent: true,
+          email_sent_at: new Date().toISOString()
+        })
+        .eq('id', request.id);
     } catch (emailError) {
       console.error('Error sending request email:', emailError);
       // Don't fail the request creation if email fails
@@ -260,6 +271,15 @@ router.post('/:token/fulfill', authMiddleware, async (req, res) => {
           recipientName,
           shareLink.share_token
         );
+        
+        // Update notification_sent status
+        await supabaseAdmin
+          .from('document_requests')
+          .update({ 
+            notification_sent: true,
+            notification_sent_at: new Date().toISOString()
+          })
+          .eq('id', request.id);
       } catch (emailError) {
         console.error('Error sending fulfillment email:', emailError);
       }
