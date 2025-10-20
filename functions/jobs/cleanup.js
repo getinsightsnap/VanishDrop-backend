@@ -7,11 +7,12 @@ export const cleanupExpiredFiles = async () => {
   try {
     console.log('🧹 Starting cleanup of expired files...');
 
-    // Get all expired files
+    // Get all expired files (excluding files with no expiry - expires_at IS NULL)
     const { data: expiredFiles, error: fetchError } = await supabaseAdmin
       .from('uploaded_files')
       .select('*')
-      .lt('expires_at', new Date().toISOString());
+      .lt('expires_at', new Date().toISOString())
+      .not('expires_at', 'is', null); // Skip files with no expiry
 
     if (fetchError) {
       console.error('Error fetching expired files:', fetchError);
@@ -97,7 +98,8 @@ export const cleanupExpiredShareLinks = async () => {
           file_type
         )
       `)
-      .lt('expires_at', new Date().toISOString());
+      .lt('expires_at', new Date().toISOString())
+      .not('expires_at', 'is', null); // Skip links with no expiry
 
     if (fetchError) {
       console.error('Error fetching expired links:', fetchError);
