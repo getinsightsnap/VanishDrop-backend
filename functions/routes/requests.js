@@ -1,11 +1,14 @@
 import express from 'express';
+import multer from 'multer';
 import { supabaseAdmin } from '../../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { shareLimiter } from '../middleware/rateLimiter.js';
+import { shareLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
 import { sendDocumentRequestEmail, sendRequestFulfilledEmail } from '../utils/email.js';
 import crypto from 'crypto';
+import bcrypt from 'bcrypt';
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Generate unique request token
 const generateRequestToken = () => {
@@ -179,7 +182,227 @@ router.get('/:token', async (req, res) => {
   }
 });
 
-// Fulfill request with document upload
+// Fulfill request with file upload (NEW DEDICATED ENDPOINT)
+router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+
+    const {
+      request_token,
+      expires_in_hours,
+      password,
+      require_otp,
+      otp_email,
+      max_opens,
+      allow_download
+    } = req.body;
+
+    const user_id = req.user.id;
+    const file = req.file;
+
+    // Get request details
+    const { data: request, error: requestError } = await supabaseAdmin
+      .from('document_requests')
+      .select('*')
+      .eq('request_token', request_token)
+      .single();
+
+    if (requestError || !request) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+
+    // Check if already fulfilled
+    if (request.status !== 'pending') {
+      return res.status(400).json({ error: `Request is ${request.status}` });
+    }
+
+    // Check if expired
+    if (request.upload_deadline && new Date(request.upload_deadline) < new Date()) {
+      await supabaseAdmin
+        .from('document_requests')
+        .update({ status: 'expired' })
+        .eq('id', request.id);
+      return res.status(410).json({ error: 'Request has expired' });
+    }
+
+    // Get user email to verify recipient
+    const { data: user } = await supabaseAdmin
+      .from('users')
+      .select('email')
+      .eq('id', user_id)
+      .single();
+
+    if (!user || user.email !== request.recipient_email) {
+      return res.status(403).json({ error: 'You are not the intended recipient of this request' });
+    }
+
+    // Generate unique file name
+    const fileExtension = file.originalname.split('.').pop() || '';
+    const uniqueId = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+    const fileName = `${uniqueId}.${fileExtension}`;
+    const filePath = `${user_id}/request-fulfillments/${fileName}`;
+
+    // Upload to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+      .from('user-files')
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      return res.status(500).json({ error: 'Failed to upload file to storage' });
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from('user-files')
+      .getPublicUrl(filePath);
+
+    // Calculate expiration time
+    const hoursToExpire = parseInt(expires_in_hours) || 24;
+    let expiresAt = null;
+    
+    if (hoursToExpire === 0) {
+      expiresAt = null; // No expiry
+    } else {
+      expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + hoursToExpire);
+    }
+
+    // Create file record in database
+    const { data: fileData, error: fileError } = await supabaseAdmin
+      .from('uploaded_files')
+      .insert({
+        user_id,
+        filename: file.originalname,
+        file_size: file.size,
+        file_type: file.mimetype,
+        file_url: publicUrl,
+        expires_at: expiresAt ? expiresAt.toISOString() : null,
+        is_encrypted: false
+      })
+      .select()
+      .single();
+
+    if (fileError) {
+      // Rollback: Delete uploaded file from storage
+      await supabaseAdmin.storage
+        .from('user-files')
+        .remove([filePath]);
+      console.error('Error creating file record:', fileError);
+      return res.status(500).json({ error: 'Failed to create file record' });
+    }
+
+    // Hash password if provided
+    let passwordHash = null;
+    if (password) {
+      passwordHash = await bcrypt.hash(password, 10);
+    }
+
+    // Generate unique share token
+    const shareToken = crypto.randomBytes(16).toString('hex');
+
+    // Create share link
+    const { data: shareLink, error: shareLinkError } = await supabaseAdmin
+      .from('share_links')
+      .insert({
+        user_id,
+        file_id: fileData.id,
+        share_token: shareToken,
+        expires_at: expiresAt ? expiresAt.toISOString() : null,
+        max_opens: max_opens ? parseInt(max_opens) : null,
+        current_opens: 0,
+        password_hash: passwordHash,
+        require_otp: require_otp === 'true',
+        otp_email: require_otp === 'true' ? otp_email : null,
+        download_allowed: allow_download !== 'false'
+      })
+      .select()
+      .single();
+
+    if (shareLinkError) {
+      // Rollback: Delete file and storage
+      await supabaseAdmin.from('uploaded_files').delete().eq('id', fileData.id);
+      await supabaseAdmin.storage.from('user-files').remove([filePath]);
+      console.error('Error creating share link:', shareLinkError);
+      return res.status(500).json({ error: 'Failed to create share link' });
+    }
+
+    // Update request status to fulfilled
+    const { error: updateError } = await supabaseAdmin
+      .from('document_requests')
+      .update({
+        status: 'fulfilled',
+        fulfilled_at: new Date().toISOString(),
+        fulfilled_by_user_id: user_id,
+        share_link_id: shareLink.id
+      })
+      .eq('id', request.id);
+
+    if (updateError) {
+      console.error('Error updating request:', updateError);
+      // Don't rollback here, just log the error
+    }
+
+    // Get requester details for notification
+    const { data: requester } = await supabaseAdmin
+      .from('users')
+      .select('email')
+      .eq('id', request.requester_id)
+      .single();
+
+    // Send notification email to requester
+    if (requester) {
+      try {
+        const recipientName = user.email.split('@')[0];
+        await sendRequestFulfilledEmail(
+          requester.email,
+          recipientName,
+          shareLink.share_token,
+          request.id
+        );
+        
+        // Update notification_sent status
+        await supabaseAdmin
+          .from('document_requests')
+          .update({ 
+            notification_sent: true,
+            notification_sent_at: new Date().toISOString()
+          })
+          .eq('id', request.id);
+      } catch (emailError) {
+        console.error('Error sending fulfillment email:', emailError);
+      }
+    }
+
+    // Increment requester's request counter
+    await supabaseAdmin
+      .from('users')
+      .update({ 
+        lifetime_requests: supabaseAdmin.raw('lifetime_requests + 1')
+      })
+      .eq('id', request.requester_id);
+
+    res.json({
+      success: true,
+      message: 'File uploaded and request fulfilled successfully',
+      share_token: shareLink.share_token,
+      share_link_id: shareLink.id,
+      file_id: fileData.id
+    });
+
+  } catch (error) {
+    console.error('Error in fulfill-upload:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Legacy fulfill endpoint (keep for compatibility)
 router.post('/:token/fulfill', authMiddleware, async (req, res) => {
   try {
     const { token } = req.params;
