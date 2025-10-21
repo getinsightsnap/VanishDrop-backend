@@ -269,7 +269,8 @@ router.post('/:token/fulfill', authMiddleware, async (req, res) => {
         await sendRequestFulfilledEmail(
           requester.email,
           recipientName,
-          shareLink.share_token
+          shareLink.share_token,
+          request.id
         );
         
         // Update notification_sent status
