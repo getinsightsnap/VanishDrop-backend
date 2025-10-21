@@ -185,8 +185,8 @@ router.get('/:token', async (req, res) => {
   }
 });
 
-// Fulfill request with file upload (NEW DEDICATED ENDPOINT)
-router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('file'), async (req, res) => {
+// Fulfill request with file upload (ANONYMOUS - NO AUTH REQUIRED)
+router.post('/fulfill-upload', uploadLimiter, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file provided' });
@@ -202,7 +202,6 @@ router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('fil
       allow_download
     } = req.body;
 
-    const user_id = req.user.id;
     const file = req.file;
 
     // Get request details
@@ -230,22 +229,11 @@ router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('fil
       return res.status(410).json({ error: 'Request has expired' });
     }
 
-    // Get user email to verify recipient
-    const { data: user } = await supabaseAdmin
-      .from('users')
-      .select('email')
-      .eq('id', user_id)
-      .single();
-
-    if (!user || user.email !== request.recipient_email) {
-      return res.status(403).json({ error: 'You are not the intended recipient of this request' });
-    }
-
-    // Generate unique file name
+    // Generate unique file name (anonymous upload - no user_id folder)
     const fileExtension = file.originalname.split('.').pop() || '';
     const uniqueId = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
     const fileName = `${uniqueId}.${fileExtension}`;
-    const filePath = `${user_id}/request-fulfillments/${fileName}`;
+    const filePath = `anonymous-fulfillments/${fileName}`;
 
     // Upload to Supabase Storage
     const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
@@ -277,11 +265,11 @@ router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('fil
       expiresAt.setHours(expiresAt.getHours() + hoursToExpire);
     }
 
-    // Create file record in database
+    // Create file record in database (anonymous upload - user_id = NULL)
     const { data: fileData, error: fileError } = await supabaseAdmin
       .from('uploaded_files')
       .insert({
-        user_id,
+        user_id: null, // Anonymous upload
         filename: file.originalname,
         file_size: file.size,
         file_type: file.mimetype,
@@ -310,11 +298,11 @@ router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('fil
     // Generate unique share token
     const shareToken = crypto.randomBytes(16).toString('hex');
 
-    // Create share link
+    // Create share link (anonymous upload - user_id = NULL)
     const { data: shareLink, error: shareLinkError } = await supabaseAdmin
       .from('share_links')
       .insert({
-        user_id,
+        user_id: null, // Anonymous upload
         file_id: fileData.id,
         share_token: shareToken,
         expires_at: expiresAt ? expiresAt.toISOString() : null,
@@ -336,13 +324,13 @@ router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('fil
       return res.status(500).json({ error: 'Failed to create share link' });
     }
 
-    // Update request status to fulfilled
+    // Update request status to fulfilled (no fulfilled_by_user_id for anonymous)
     const { error: updateError } = await supabaseAdmin
       .from('document_requests')
       .update({
         status: 'fulfilled',
         fulfilled_at: new Date().toISOString(),
-        fulfilled_by_user_id: user_id,
+        fulfilled_by_user_id: null, // Anonymous fulfillment
         share_link_id: shareLink.id
       })
       .eq('id', request.id);
@@ -362,7 +350,7 @@ router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('fil
     // Send notification email to requester
     if (requester) {
       try {
-        const recipientName = user.email.split('@')[0];
+        const recipientName = request.recipient_email.split('@')[0];
         await sendRequestFulfilledEmail(
           requester.email,
           recipientName,
