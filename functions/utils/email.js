@@ -346,48 +346,109 @@ VanishDrop Team
 };
 
 // Send request fulfilled notification to requester
-export const sendRequestFulfilledEmail = async (requesterEmail, recipientName, shareToken) => {
+export const sendRequestFulfilledEmail = async (requesterEmail, recipientName, shareToken, requestId) => {
   if (!sendGridAvailable) {
     console.warn('SendGrid not available, skipping fulfillment email');
     return { success: false, message: 'SendGrid package not installed' };
   }
 
+  const dashboardUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/dashboard?view=requested-documents&request=${requestId}`;
   const shareUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/share/${shareToken}`;
 
   const msg = {
     to: requesterEmail,
     from: process.env.EMAIL_FROM || 'noreply@vanishdrop.com',
-    subject: 'Your document request has been fulfilled',
+    subject: '✅ Your document request has been fulfilled',
     text: `
 Hello,
 
-Good news! ${recipientName} has uploaded the document you requested.
+Great news! ${recipientName} has uploaded the document you requested.
 
-You can now access the document here:
+You can access your requested documents here:
+${dashboardUrl}
+
+Or view the document directly here:
 ${shareUrl}
 
 Best regards,
 VanishDrop Team
     `,
     html: `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <h2 style="color: #333;">✅ Document Request Fulfilled</h2>
-  <p>Hello,</p>
-  <p>Good news! <strong>${recipientName}</strong> has uploaded the document you requested.</p>
-  
-  <p>You can now access the document by clicking the button below:</p>
-  
-  <a href="${shareUrl}" style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0;">
-    View Document
-  </a>
-  
-  <p style="color: #999; font-size: 12px; margin-top: 30px;">
-    If the button doesn't work, copy and paste this link into your browser:<br>
-    ${shareUrl}
-  </p>
-  
-  <p>Best regards,<br>VanishDrop Team</p>
-</div>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document Request Fulfilled</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; }
+    .header h1 { margin: 0; font-size: 28px; }
+    .content { padding: 30px; }
+    .success-badge { background: #d1fae5; border-left: 4px solid #10b981; padding: 20px; margin: 20px 0; border-radius: 5px; }
+    .success-badge p { margin: 8px 0; color: #065f46; }
+    .success-badge strong { color: #10b981; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 15px 40px; text-decoration: none; border-radius: 50px; margin: 10px 0; font-weight: bold; box-shadow: 0 4px 15px rgba(16,185,129,0.4); }
+    .cta-button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16,185,129,0.6); }
+    .secondary-button { display: inline-block; background: #e5e7eb; color: #374151; padding: 12px 30px; text-decoration: none; border-radius: 50px; margin: 10px 0; font-weight: 600; }
+    .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #6c757d; }
+    .footer a { color: #10b981; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✅ Document Received!</h1>
+      <p style="margin: 10px 0 0 0; opacity: 0.9;">Your request has been fulfilled</p>
+    </div>
+    <div class="content">
+      <h2 style="color: #333; margin-top: 0;">Great News!</h2>
+      <p><strong>${recipientName}</strong> has successfully uploaded the document you requested.</p>
+      
+      <div class="success-badge">
+        <p><strong>📁 Document Status:</strong> Ready to View</p>
+        <p><strong>👤 Uploaded by:</strong> ${recipientName}</p>
+        <p><strong>🔐 Security:</strong> Access controls applied by uploader</p>
+      </div>
+      
+      <p style="margin: 30px 0 20px 0; text-align: center; font-weight: 600; color: #374151;">
+        Choose how you'd like to access your document:
+      </p>
+      
+      <div style="text-align: center;">
+        <a href="${dashboardUrl}" class="cta-button">
+          View in Dashboard
+        </a>
+        <br>
+        <a href="${shareUrl}" class="secondary-button">
+          Direct Document Link
+        </a>
+      </div>
+      
+      <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 30px 0; border-radius: 5px;">
+        <p style="margin: 0; color: #92400e; font-size: 14px;">
+          <strong>💡 Tip:</strong> Use the dashboard to manage all your requested documents in one place. The direct link provides immediate access to this specific file.
+        </p>
+      </div>
+      
+      <p style="color: #666; font-size: 14px; margin-top: 30px;">
+        Note: Document access and download permissions are controlled by the uploader's security settings.
+      </p>
+    </div>
+    <div class="footer">
+      <p>
+        This email was sent by VanishDrop<br>
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/terms">Terms of Service</a> | 
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/privacy">Privacy Policy</a>
+      </p>
+      <p style="margin-top: 10px; color: #adb5bd;">
+        This is an automated message, please do not reply.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
     `
   };
 
