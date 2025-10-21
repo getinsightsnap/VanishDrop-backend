@@ -10,13 +10,16 @@ import bcrypt from 'bcrypt';
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+// JSON middleware for routes that need it (non-upload routes)
+const jsonParser = express.json();
+
 // Generate unique request token
 const generateRequestToken = () => {
   return crypto.randomBytes(16).toString('hex');
 };
 
 // Create new document request (Free users: 3 lifetime, Pro users: unlimited)
-router.post('/create', authMiddleware, shareLimiter, async (req, res) => {
+router.post('/create', jsonParser, authMiddleware, shareLimiter, async (req, res) => {
   try {
     const { recipient_email, request_message, upload_deadline } = req.body;
     const requester_id = req.user.id;
@@ -403,7 +406,7 @@ router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('fil
 });
 
 // Legacy fulfill endpoint (keep for compatibility)
-router.post('/:token/fulfill', authMiddleware, async (req, res) => {
+router.post('/:token/fulfill', jsonParser, authMiddleware, async (req, res) => {
   try {
     const { token } = req.params;
     const { share_link_id } = req.body;
@@ -522,7 +525,7 @@ router.post('/:token/fulfill', authMiddleware, async (req, res) => {
 });
 
 // Get user's requests (as requester)
-router.get('/my/requests', authMiddleware, async (req, res) => {
+router.get('/my/requests', jsonParser, authMiddleware, async (req, res) => {
   try {
     const user_id = req.user.id;
 
@@ -574,7 +577,7 @@ router.get('/my/requests', authMiddleware, async (req, res) => {
 });
 
 // Get requests sent to user (as recipient)
-router.get('/my/received', authMiddleware, async (req, res) => {
+router.get('/my/received', jsonParser, authMiddleware, async (req, res) => {
   try {
     const user_id = req.user.id;
 
@@ -612,7 +615,7 @@ router.get('/my/received', authMiddleware, async (req, res) => {
 });
 
 // Cancel request
-router.delete('/:id/cancel', authMiddleware, async (req, res) => {
+router.delete('/:id/cancel', jsonParser, authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const user_id = req.user.id;
