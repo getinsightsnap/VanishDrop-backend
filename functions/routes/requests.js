@@ -384,12 +384,25 @@ router.post('/fulfill-upload', uploadLimiter, authMiddleware, upload.single('fil
     }
 
     // Increment requester's request counter
-    await supabaseAdmin
-      .from('users')
-      .update({ 
-        lifetime_requests: supabaseAdmin.raw('lifetime_requests + 1')
-      })
-      .eq('id', request.requester_id);
+    try {
+      const { data: requesterData } = await supabaseAdmin
+        .from('users')
+        .select('lifetime_requests')
+        .eq('id', request.requester_id)
+        .single();
+      
+      if (requesterData) {
+        await supabaseAdmin
+          .from('users')
+          .update({ 
+            lifetime_requests: (requesterData.lifetime_requests || 0) + 1
+          })
+          .eq('id', request.requester_id);
+      }
+    } catch (counterError) {
+      console.error('Error incrementing request counter:', counterError);
+      // Don't fail the whole request if counter increment fails
+    }
 
     res.json({
       success: true,
