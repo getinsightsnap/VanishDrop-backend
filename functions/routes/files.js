@@ -138,6 +138,7 @@ router.post('/anonymous-upload', uploadLimiter, upload.single('file'), validateF
 router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), validateFileUpload, async (req, res) => {
   try {
     console.log('=== UPLOAD REQUEST START ===');
+    console.log('🔍 Upload middleware chain completed successfully');
     console.log('Request body:', req.body);
     console.log('Request file:', req.file ? {
       fieldname: req.file.fieldname,
@@ -383,10 +384,12 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       has_thumbnail: !!thumbnailUrl
     });
   } catch (error) {
-    console.error('File upload error:', error);
-    console.error('Error stack:', error.stack);
-    console.error('User ID:', req.user?.id);
-    console.error('File:', req.file?.originalname, req.file?.size);
+    console.error('❌ File upload error:', error);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ User ID:', req.user?.id);
+    console.error('❌ File:', req.file?.originalname, req.file?.size);
+    console.error('❌ Error type:', error.constructor.name);
+    console.error('❌ Error message:', error.message);
     
     logError(error, {
       context: 'file_upload',
@@ -399,6 +402,7 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
     res.status(500).json({ 
       error: 'Failed to upload file',
       message: error.message,
+      type: error.constructor.name,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
