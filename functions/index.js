@@ -226,6 +226,15 @@ console.log('✅ All API routes registered');
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  console.error('❌ Global error handler:', {
+    error: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+    ip: req.ip,
+    type: err.constructor.name
+  });
+  
   logger.error({
     error: err.message,
     stack: err.stack,
@@ -236,7 +245,9 @@ app.use((err, req, res, next) => {
   
   res.status(500).json({
     error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    type: err.constructor.name,
+    details: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 });
 
