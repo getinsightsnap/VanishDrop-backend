@@ -70,6 +70,7 @@ router.post('/anonymous', validateShareLink, async (req, res) => {
     }
 
     // Generate QR code if requested
+    console.log(`🎨 QR code generation check - qr_code_enabled: ${qr_code_enabled}`);
     let qr_code_url = null;
     if (qr_code_enabled) {
       try {
@@ -138,6 +139,8 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
       otp_email,
       qr_code_enabled
     } = req.body;
+
+    console.log(`🎨 QR code flag received: ${qr_code_enabled} (type: ${typeof qr_code_enabled})`);
 
     // Verify file ownership
     const { data: fileData, error: fileError } = await supabaseAdmin
@@ -241,6 +244,7 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
     }
 
     // Generate QR code if requested
+    console.log(`🎨 Authenticated QR code generation check - qr_code_enabled: ${qr_code_enabled}`);
     let qrCodeDataURL = null;
     if (qr_code_enabled) {
       try {
