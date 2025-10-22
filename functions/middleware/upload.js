@@ -48,11 +48,19 @@ const fileFilter = (req, file, cb) => {
     'text/html',
     'text/css',
     'application/xml',
+    // Encrypted files (E2EE)
+    'application/octet-stream',
   ];
 
-  if (allowedTypes.includes(file.mimetype)) {
+  // Check if it's an encrypted file (has .encrypted extension or is_encrypted flag)
+  const isEncrypted = file.originalname.endsWith('.encrypted') || 
+                     (req.body && req.body.is_encrypted === 'true');
+
+  if (allowedTypes.includes(file.mimetype) || isEncrypted) {
+    console.log(`✅ File type allowed: ${file.mimetype} (encrypted: ${isEncrypted})`);
     cb(null, true);
   } else {
+    console.log(`❌ File type rejected: ${file.mimetype}`);
     cb(new Error(`File type ${file.mimetype} is not allowed`), false);
   }
 };
