@@ -38,6 +38,7 @@ router.post('/anonymous', validateShareLink, async (req, res) => {
     // Generate unique share token
     const share_token = Math.random().toString(36).substring(2, 15) + 
                        Math.random().toString(36).substring(2, 15);
+    console.log(`🔗 Generated share token: ${share_token}`);
 
     // Hash password if provided
     let password_hash = null;
@@ -153,6 +154,7 @@ router.post('/', authMiddleware, validateShareLink, async (req, res) => {
     // Generate unique share token
     const share_token = Math.random().toString(36).substring(2, 15) + 
                        Math.random().toString(36).substring(2, 15);
+    console.log(`🔗 Generated share token: ${share_token}`);
 
     // Hash password if provided
     let password_hash = null;
@@ -312,18 +314,27 @@ router.get('/:token', async (req, res) => {
   try {
     const { token } = req.params;
 
+    console.log(`🔍 Looking for share link with token: ${token}`);
     const { data, error } = await supabaseAdmin
       .from('share_links')
       .select(`
         *,
-        uploaded_files (filename, file_size, file_url, is_encrypted, encryption_iv, original_filename, original_file_type, has_watermark)
+        uploaded_files (*)
       `)
       .eq('share_token', token)
       .single();
 
-    if (error || !data) {
+    if (error) {
+      console.error(`❌ Database error for token ${token}:`, error);
       return res.status(404).json({ error: 'Share link not found' });
     }
+
+    if (!data) {
+      console.log(`❌ No data found for token: ${token}`);
+      return res.status(404).json({ error: 'Share link not found' });
+    }
+
+    console.log(`✅ Share link found for token: ${token}`, { id: data.id, file_id: data.file_id });
 
     // Check if expired (only if expires_at is set)
     if (data.expires_at && new Date(data.expires_at) < new Date()) {
