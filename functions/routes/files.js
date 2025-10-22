@@ -92,7 +92,7 @@ router.post('/anonymous-upload', uploadLimiter, upload.single('file'), validateF
         file_size: file.size,
         file_type: file.mimetype,
         file_url: publicUrl,
-        expires_at: expiresAt.toISOString()
+        expires_at: expiresAt ? expiresAt.toISOString() : null
       })
       .select()
       .single();
@@ -124,7 +124,7 @@ router.post('/anonymous-upload', uploadLimiter, upload.single('file'), validateF
       file_name: file.originalname,
       file_size: file.size,
       file_url: publicUrl,
-      expires_at: expiresAt.toISOString(),
+      expires_at: expiresAt ? expiresAt.toISOString() : null,
       message: 'File uploaded successfully'
     });
 
@@ -328,7 +328,7 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
         file_size: file.size,
         file_type: is_encrypted === 'true' ? original_file_type : file.mimetype,
         file_url: publicUrl,
-        expires_at: expiresAt.toISOString(),
+        expires_at: expiresAt ? expiresAt.toISOString() : null,
         is_encrypted: is_encrypted === 'true',
         encryption_iv: is_encrypted === 'true' ? encryption_iv : null,
         original_filename: is_encrypted === 'true' ? original_filename : null,
