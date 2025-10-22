@@ -15,11 +15,16 @@ import { supabaseAdmin } from '../config/supabase.js';
 
 dotenv.config();
 
+console.log('🔧 Starting VanishDrop Backend initialization...');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+console.log(`📍 Server will attempt to bind to port: ${PORT}`);
+
 // Trust proxy - required for Railway and rate limiting
 app.set('trust proxy', 1);
+console.log('✅ Trust proxy configured');
 
 // Middleware
 const allowedOrigins = [
@@ -64,11 +69,13 @@ app.use((req, res, next) => {
 
 // Apply general rate limiting to all routes
 app.use('/api/', generalLimiter);
+console.log('✅ Rate limiting configured');
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+console.log('✅ Health check endpoint registered');
 
 // Simple debug endpoint
 app.get('/debug', (req, res) => {
@@ -207,6 +214,7 @@ app.get('/debug/db', async (req, res) => {
 // API Routes - Apply JSON parsing to all routes except webhooks and file uploads
 // Webhooks need raw body for signature verification
 // File upload routes need multer for multipart/form-data
+console.log('🔌 Registering API routes...');
 app.use('/api/files', express.json(), fileRoutes);
 app.use('/api/users', express.json(), userRoutes);
 app.use('/api/share', express.json(), shareRoutes);
@@ -214,6 +222,7 @@ app.use('/api/admin', express.json(), adminRoutes);
 app.use('/api/analytics', express.json(), analyticsRoutes);
 app.use('/api/requests', requestRoutes); // Removed express.json() - routes handle it individually (multer for uploads)
 app.use('/api/webhook', checkoutLimiter, webhookRoutes); // No express.json() - webhook route handles its own body parsing
+console.log('✅ All API routes registered');
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -236,7 +245,10 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not Found' });
 });
 
-app.listen(PORT, () => {
+console.log('🚀 Attempting to start server...');
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server successfully bound to 0.0.0.0:${PORT}`);
   logger.info(`🚀 VanishDrop Backend running on port ${PORT}`);
   logger.info(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`🔐 CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:5175'}`);
@@ -249,3 +261,42 @@ app.listen(PORT, () => {
     logger.warn('⚠️  Cron jobs disabled via ENABLE_CRON_JOBS env variable');
   }
 });
+
+// Handle server errors
+server.on('error', (error) => {
+  logger.error('❌ Server failed to start:', error);
+  process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('⚠️ SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    logger.info('✅ HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  logger.info('⚠️ SIGINT signal received: closing HTTP server');
+  server.close(() => {
+    logger.info('✅ HTTP server closed');
+    process.exit(0);
+  });
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  logger.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.error('Unhandled Rejection:', { reason, promise });
+  process.exit(1);
+});
+
+console.log('✅ All initialization complete, server should be running');
