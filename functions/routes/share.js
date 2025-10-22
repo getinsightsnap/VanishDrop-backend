@@ -364,12 +364,16 @@ router.get('/:token', async (req, res) => {
           file_size: data.uploaded_files.file_size,
           file_type: data.uploaded_files.file_type,
           is_encrypted: data.uploaded_files.is_encrypted,
-          encryption_iv: data.uploaded_files.encryption_iv
+          encryption_iv: data.uploaded_files.encryption_iv,
+          original_filename: data.uploaded_files.original_filename,
+          original_file_type: data.uploaded_files.original_file_type
           // Don't send file_url until password is verified
         } : {
           ...data.uploaded_files,
           is_encrypted: data.uploaded_files.is_encrypted,
-          encryption_iv: data.uploaded_files.encryption_iv
+          encryption_iv: data.uploaded_files.encryption_iv,
+          original_filename: data.uploaded_files.original_filename,
+          original_file_type: data.uploaded_files.original_file_type
         }
       }
     });
