@@ -325,8 +325,8 @@ router.get('/:token', async (req, res) => {
       return res.status(404).json({ error: 'Share link not found' });
     }
 
-    // Check if expired
-    if (new Date(data.expires_at) < new Date()) {
+    // Check if expired (only if expires_at is set)
+    if (data.expires_at && new Date(data.expires_at) < new Date()) {
       return res.status(410).json({ error: 'Share link expired' });
     }
 
@@ -437,14 +437,18 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
       return res.status(400).json({ error: 'This share link does not require OTP' });
     }
 
-    // Check if expired
-    const now = new Date();
-    const expiresAt = new Date(linkData.expires_at);
-    console.log(`🔍 Checking expiration - Now: ${now.toISOString()}, Expires: ${expiresAt.toISOString()}`);
-    
-    if (expiresAt < now) {
-      console.log('❌ Share link has expired');
-      return res.status(410).json({ error: 'Share link expired' });
+    // Check if expired (only if expires_at is set)
+    if (linkData.expires_at) {
+      const now = new Date();
+      const expiresAt = new Date(linkData.expires_at);
+      console.log(`🔍 Checking expiration - Now: ${now.toISOString()}, Expires: ${expiresAt.toISOString()}`);
+      
+      if (expiresAt < now) {
+        console.log('❌ Share link has expired');
+        return res.status(410).json({ error: 'Share link expired' });
+      }
+    } else {
+      console.log('ℹ️ No expiration set for this share link');
     }
 
     // Generate and store OTP
@@ -561,8 +565,8 @@ router.post('/:token/access', shareLimiter, validateShareAccess, async (req, res
       return res.status(404).json({ error: 'Share link not found' });
     }
 
-    // Check if expired
-    if (new Date(linkData.expires_at) < new Date()) {
+    // Check if expired (only if expires_at is set)
+    if (linkData.expires_at && new Date(linkData.expires_at) < new Date()) {
       await supabaseAdmin
         .from('access_logs')
         .insert({
