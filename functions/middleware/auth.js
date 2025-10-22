@@ -3,8 +3,14 @@ import { supabase } from '../../config/supabase.js';
 export const authMiddleware = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
+    console.log('🔐 Auth check:', {
+      hasAuthHeader: !!authHeader,
+      headerPreview: authHeader ? authHeader.substring(0, 30) + '...' : 'none',
+      path: req.path
+    });
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('❌ Invalid auth header:', authHeader);
       return res.status(401).json({ error: 'Missing or invalid authorization header' });
     }
 
