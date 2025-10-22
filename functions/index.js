@@ -215,7 +215,7 @@ app.get('/debug/db', async (req, res) => {
 // Webhooks need raw body for signature verification
 // File upload routes need multer for multipart/form-data
 console.log('🔌 Registering API routes...');
-app.use('/api/files', express.json(), fileRoutes);
+app.use('/api/files', fileRoutes); // Removed express.json() - file uploads use multer for multipart/form-data
 app.use('/api/users', express.json(), userRoutes);
 app.use('/api/share', express.json(), shareRoutes);
 app.use('/api/admin', express.json(), adminRoutes);
