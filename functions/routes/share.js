@@ -316,7 +316,7 @@ router.get('/:token', async (req, res) => {
       .from('share_links')
       .select(`
         *,
-        uploaded_files (*)
+        uploaded_files (filename, file_size, file_url, is_encrypted, encryption_iv, original_filename, original_file_type, has_watermark)
       `)
       .eq('share_token', token)
       .single();
@@ -577,8 +577,10 @@ router.post('/:token/access', shareLimiter, validateShareAccess, async (req, res
       return res.status(410).json({ error: 'Share link expired' });
     }
 
-    // Check if max opens reached
+    // Check if max opens reached (allow the last access)
+    console.log(`🔢 Open count check - current: ${linkData.current_opens}, max: ${linkData.max_opens}`);
     if (linkData.max_opens && linkData.current_opens >= linkData.max_opens) {
+      console.log(`❌ Maximum opens reached - current: ${linkData.current_opens}, max: ${linkData.max_opens}`);
       await supabaseAdmin
         .from('access_logs')
         .insert({
@@ -647,6 +649,7 @@ router.post('/:token/access', shareLimiter, validateShareAccess, async (req, res
     }
 
     // Increment counter
+    console.log(`🔢 Incrementing open count from ${linkData.current_opens} to ${linkData.current_opens + 1}`);
     const { error: updateError } = await supabaseAdmin
       .from('share_links')
       .update({ current_opens: linkData.current_opens + 1 })
