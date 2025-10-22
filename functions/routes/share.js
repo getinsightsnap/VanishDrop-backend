@@ -473,6 +473,31 @@ router.post('/:token/request-otp', shareLimiter, async (req, res) => {
 
     console.log(`Generated OTP for ${email}: ${otp} (identifier: ${identifier})`);
 
+    // Increment OTP count in database
+    // First, get the current count
+    const { data: currentData } = await supabaseAdmin
+      .from('share_links')
+      .select('otp_generated_count')
+      .eq('id', linkData.id)
+      .single();
+
+    const currentCount = currentData?.otp_generated_count || 0;
+
+    // Then update it
+    const { error: updateError } = await supabaseAdmin
+      .from('share_links')
+      .update({ 
+        otp_generated_count: currentCount + 1
+      })
+      .eq('id', linkData.id);
+
+    if (updateError) {
+      console.error('⚠️ Failed to increment OTP count:', updateError);
+      // Don't fail the request, just log the error
+    } else {
+      console.log(`✅ OTP count incremented for share link ${linkData.id}: ${currentCount} -> ${currentCount + 1}`);
+    }
+
     // Send OTP via email
     console.log(`📧 Attempting to send OTP email to: ${email}`);
     const emailResult = await sendOTPEmail(email, otp);
