@@ -188,6 +188,108 @@ router.post('/dodo/create-checkout', express.json(), async (req, res) => {
   }
 });
 
+// Create Dodo Payments lifetime deal checkout (one-time payment)
+router.post('/dodo/create-lifetime-checkout', express.json(), async (req, res) => {
+  try {
+    logger.info('Lifetime checkout endpoint hit', { 
+      body: req.body, 
+      hasApiKey: !!process.env.DODO_PAYMENTS_API_KEY,
+      apiKeyLength: process.env.DODO_PAYMENTS_API_KEY?.length 
+    });
+    
+    const { userId, userEmail, redirectUrl } = req.body;
+    
+    if (!userId || !userEmail) {
+      logger.error('Missing userId or userEmail', { userId, userEmail });
+      return res.status(400).json({ error: 'userId and userEmail are required' });
+    }
+    
+    logger.info('Creating lifetime deal checkout session', { userId, userEmail });
+    
+    // Lifetime deal product ID (one-time payment product)
+    // TODO: Configure this in Dodo Payments dashboard as a one-time payment product for $149
+    const lifetimeProductId = process.env.DODO_LIFETIME_PRODUCT_ID || 'pdt_lifetime_deal_149';
+    
+    // Extract billing info from request (optional from frontend)
+    const { billingInfo } = req.body;
+    
+    // Billing info for one-time payment
+    const billing = billingInfo || {
+      city: "",  // User will update on checkout page
+      country: "US",  // Default, user can change
+      state: "",
+      street: "",
+      zipcode: ""
+    };
+    
+    logger.info('Creating lifetime deal with SDK', { userId, userEmail, hasBillingInfo: !!billingInfo });
+    
+    // Create checkout session for one-time payment
+    const checkoutPayload = {
+      product_cart: [
+        { 
+          product_id: lifetimeProductId, 
+          quantity: 1
+        }
+      ],
+      feature_flags: {
+        allow_discount_code: true // Enable coupon/discount code field on checkout
+      },
+      return_url: redirectUrl || 'https://vanishdrop.com/payment/success',
+      customer: {
+        email: userEmail,
+        name: userEmail.split('@')[0], // Extract name from email
+      },
+      billing_address: billing,
+      // Metadata at checkout session level
+      metadata: {
+        user_id: userId,
+        user_email: userEmail,
+        source: 'vanishdrop_webapp',
+        payment_type: 'lifetime_deal',
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    // Log the complete payload being sent to Dodo Payments
+    logger.info('📤 Sending lifetime checkout payload to Dodo Payments', { 
+      payload: JSON.stringify(checkoutPayload, null, 2),
+      userId,
+      userEmail
+    });
+    
+    const checkoutResponse = await dodoClient.checkoutSessions.create(checkoutPayload);
+    
+    logger.info('✅ Lifetime checkout session created', { 
+      checkoutUrl: checkoutResponse.checkout_url,
+      sessionId: checkoutResponse.session_id,
+      userId, 
+      userEmail 
+    });
+    
+    res.json({
+      success: true,
+      checkoutUrl: checkoutResponse.checkout_url,
+      sessionId: checkoutResponse.session_id
+    });
+    
+  } catch (error) {
+    logger.error('❌ Failed to create lifetime checkout', { 
+      error: error.message,
+      errorStack: error.stack,
+      errorName: error.name,
+      body: req.body,
+      hasApiKey: !!process.env.DODO_PAYMENTS_API_KEY
+    });
+    
+    res.status(500).json({ 
+      error: 'Failed to create lifetime checkout session', 
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
 // Dodo Payments Webhook Handler (Following official pattern)
 // Docs: https://docs.dodopayments.com/developer-resources/webhooks
 router.post('/dodo', express.raw({ type: 'application/json' }), async (req, res) => {
