@@ -508,6 +508,7 @@ async function handleSubscriptionActivated(payload, subscriptionData, res) {
         .from('users')
         .update({
           subscription_tier: 'pro',
+          payment_type: 'subscription', // Mark as subscription (monthly)
           upgraded_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -518,7 +519,7 @@ async function handleSubscriptionActivated(payload, subscriptionData, res) {
         throw updateError;
       }
 
-      logger.info('🎉 Successfully activated Pro subscription for user', { userId, eventType });
+      logger.info('🎉 Successfully activated Pro subscription for user', { userId, eventType, paymentType: 'subscription' });
       res.json({ success: true, message: `User ${userId} subscription activated - upgraded to Pro (${eventType})` });
       return;
     }
@@ -565,6 +566,7 @@ async function handleSubscriptionActivated(payload, subscriptionData, res) {
           .from('users')
           .update({
             subscription_tier: 'pro',
+            payment_type: 'subscription', // Mark as subscription
             upgraded_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
@@ -575,7 +577,7 @@ async function handleSubscriptionActivated(payload, subscriptionData, res) {
           throw updateError;
         }
 
-        logger.info('Successfully upgraded user to Pro', { userId: foundUserId, eventType });
+        logger.info('Successfully upgraded user to Pro', { userId: foundUserId, eventType, paymentType: 'subscription' });
         res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
         return;
       }
@@ -588,6 +590,7 @@ async function handleSubscriptionActivated(payload, subscriptionData, res) {
         .from('users')
         .update({
           subscription_tier: 'pro',
+          payment_type: 'subscription', // Mark as subscription
           upgraded_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -598,7 +601,7 @@ async function handleSubscriptionActivated(payload, subscriptionData, res) {
         throw updateError;
       }
 
-      logger.info('Successfully upgraded user to Pro', { userId: foundUserId, eventType });
+      logger.info('Successfully upgraded user to Pro', { userId: foundUserId, eventType, paymentType: 'subscription' });
       res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (${eventType})` });
       return;
     }
@@ -697,25 +700,42 @@ async function handlePaymentSuccess(payload, paymentData, res) {
     const metadata = paymentData?.metadata || payload.data?.metadata || {};
     const userId = metadata.user_id;
     const customerEmail = paymentData?.customer?.email || payload.data?.customer?.email;
+    const paymentType = metadata.payment_type; // 'lifetime_deal' or undefined
     
     logger.info('💰 One-time payment succeeded', { 
       eventType, 
       userId, 
       customerEmail,
+      paymentType,
       paymentId: paymentData?.payment_id || payload.data?.payment_id
     });
     
     // If we have user_id in metadata, upgrade the user to Pro
     if (userId) {
-      logger.info('✅ Found user_id in metadata, upgrading user to Pro', { userId });
+      const isLifetimeDeal = paymentType === 'lifetime_deal';
+      
+      logger.info('✅ Found user_id in metadata, upgrading user to Pro', { 
+        userId, 
+        isLifetimeDeal,
+        paymentType 
+      });
+      
+      // Prepare update object
+      const updateData = {
+        subscription_tier: 'pro',
+        upgraded_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      
+      // If it's a lifetime deal, mark it as such in the database
+      if (isLifetimeDeal) {
+        updateData.payment_type = 'lifetime';
+        logger.info('🌟 Marking user as LIFETIME member', { userId });
+      }
       
       const { error: updateError } = await supabaseAdmin
         .from('users')
-        .update({
-          subscription_tier: 'pro',
-          upgraded_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', userId);
 
       if (updateError) {
@@ -723,14 +743,26 @@ async function handlePaymentSuccess(payload, paymentData, res) {
         throw updateError;
       }
 
-      logger.info('🎉 Successfully upgraded user to Pro via one-time payment', { userId, eventType });
-      res.json({ success: true, message: `User ${userId} upgraded to Pro (one-time payment)` });
+      const message = isLifetimeDeal 
+        ? `User ${userId} upgraded to Pro (LIFETIME DEAL - $149)` 
+        : `User ${userId} upgraded to Pro (one-time payment)`;
+      
+      logger.info('🎉 Successfully upgraded user to Pro via one-time payment', { 
+        userId, 
+        eventType,
+        isLifetimeDeal,
+        paymentType: isLifetimeDeal ? 'lifetime' : 'one-time'
+      });
+      
+      res.json({ success: true, message });
       return;
     }
     
     // Fallback: Find user by email if no user_id in metadata
     if (customerEmail) {
-      logger.info('No user_id in metadata, trying to find user by email', { customerEmail });
+      const isLifetimeDeal = paymentType === 'lifetime_deal';
+      
+      logger.info('No user_id in metadata, trying to find user by email', { customerEmail, isLifetimeDeal });
       
       const { data: userData, error: userError } = await supabaseAdmin
         .from('users')
@@ -741,13 +773,22 @@ async function handlePaymentSuccess(payload, paymentData, res) {
       if (!userError && userData) {
         const foundUserId = userData.id;
         
+        // Prepare update object
+        const updateData = {
+          subscription_tier: 'pro',
+          upgraded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        
+        // If it's a lifetime deal, mark it as such
+        if (isLifetimeDeal) {
+          updateData.payment_type = 'lifetime';
+          logger.info('🌟 Marking user as LIFETIME member (found by email)', { userId: foundUserId });
+        }
+        
         const { error: updateError } = await supabaseAdmin
           .from('users')
-          .update({
-            subscription_tier: 'pro',
-            upgraded_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq('id', foundUserId);
 
         if (updateError) {
@@ -755,8 +796,18 @@ async function handlePaymentSuccess(payload, paymentData, res) {
           throw updateError;
         }
 
-        logger.info('🎉 Successfully upgraded user to Pro via one-time payment', { userId: foundUserId, eventType });
-        res.json({ success: true, message: `User ${foundUserId} upgraded to Pro (one-time payment)` });
+        const message = isLifetimeDeal 
+          ? `User ${foundUserId} upgraded to Pro (LIFETIME DEAL - $149)` 
+          : `User ${foundUserId} upgraded to Pro (one-time payment)`;
+
+        logger.info('🎉 Successfully upgraded user to Pro via one-time payment', { 
+          userId: foundUserId, 
+          eventType,
+          isLifetimeDeal,
+          paymentType: isLifetimeDeal ? 'lifetime' : 'one-time'
+        });
+        
+        res.json({ success: true, message });
         return;
       }
     }
