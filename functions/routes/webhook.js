@@ -207,8 +207,8 @@ router.post('/dodo/create-lifetime-checkout', express.json(), async (req, res) =
     logger.info('Creating lifetime deal checkout session', { userId, userEmail });
     
     // Lifetime deal product ID (one-time payment product)
-    // TODO: Configure this in Dodo Payments dashboard as a one-time payment product for $149
-    const lifetimeProductId = process.env.DODO_LIFETIME_PRODUCT_ID || 'pdt_lifetime_deal_149';
+    // VanishDrop Pro - Lifetime Access ($149)
+    const lifetimeProductId = process.env.DODO_LIFETIME_PRODUCT_ID || 'pdt_LxvcLh8rbaNgvi8KB5sMb';
     
     // Extract billing info from request (optional from frontend)
     const { billingInfo } = req.body;
