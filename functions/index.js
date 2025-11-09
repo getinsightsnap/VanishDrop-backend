@@ -8,6 +8,7 @@ import adminRoutes from './routes/admin.js';
 import analyticsRoutes from './routes/analytics.js';
 import webhookRoutes from './routes/webhook.js';
 import requestRoutes from './routes/requests.js';
+import lifetimeDealRoutes from './routes/lifetime-deal.js';
 import { generalLimiter, checkoutLimiter } from './middleware/rateLimiter.js';
 import { initializeCronJobs } from './jobs/cleanup.js';
 import logger from './utils/logger.js';
@@ -221,6 +222,7 @@ app.use('/api/share', express.json(), shareRoutes);
 app.use('/api/admin', express.json(), adminRoutes);
 app.use('/api/analytics', express.json(), analyticsRoutes);
 app.use('/api/requests', requestRoutes); // Removed express.json() - routes handle it individually (multer for uploads)
+app.use('/api/lifetime-deal', express.json(), lifetimeDealRoutes); // Lifetime deal counter routes
 app.use('/api/webhook', checkoutLimiter, webhookRoutes); // No express.json() - webhook route handles its own body parsing
 console.log('✅ All API routes registered');
 
