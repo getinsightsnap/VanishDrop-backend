@@ -164,7 +164,7 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
     let userData;
     const { data: existingUser, error: userError } = await supabaseAdmin
       .from('users')
-      .select('daily_upload_used, daily_upload_reset_at, subscription_tier, lifetime_upload_used')
+      .select('daily_upload_used, daily_upload_reset_at, subscription_tier, lifetime_upload_used, monthly_upload_used, monthly_upload_reset_date')
       .eq('id', user_id)
       .single();
 
@@ -213,32 +213,37 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
 
     const now = new Date();
     let dailyUsed = userData.daily_upload_used;
+    let monthlyUsed = userData.monthly_upload_used || 0;
     let lifetimeUsed = userData.lifetime_upload_used || 0;
 
     if (userData.subscription_tier === 'pro') {
-      // Pro users: Check daily limits
-      const resetTime = new Date(userData.daily_upload_reset_at);
-      const hoursPassed = (now.getTime() - resetTime.getTime()) / (1000 * 60 * 60);
-
-      if (hoursPassed >= 24) {
-        dailyUsed = 0;
+      // Pro users: Check monthly limits (100GB/month)
+      const resetDate = userData.monthly_upload_reset_date ? new Date(userData.monthly_upload_reset_date) : null;
+      
+      // If reset date has passed or doesn't exist, reset monthly usage
+      if (!resetDate || resetDate <= now) {
+        monthlyUsed = 0;
+        const nextResetDate = new Date(now);
+        nextResetDate.setMonth(nextResetDate.getMonth() + 1);
+        
         await supabaseAdmin
           .from('users')
           .update({
-            daily_upload_used: 0,
-            daily_upload_reset_at: now.toISOString()
+            monthly_upload_used: 0,
+            monthly_upload_reset_date: nextResetDate.toISOString()
           })
           .eq('id', user_id);
       }
 
-      // Check daily limit for Pro users
-      const dailyLimit = 10 * 1024 * 1024 * 1024; // 10GB
-      if (dailyUsed + file.size > dailyLimit) {
+      // Check monthly limit for Pro users: 100GB
+      const monthlyLimit = 100 * 1024 * 1024 * 1024; // 100GB
+      if (monthlyUsed + file.size > monthlyLimit) {
         return res.status(403).json({
-          error: 'Daily upload limit exceeded',
-          limit: dailyLimit,
-          used: dailyUsed,
-          fileSize: file.size
+          error: 'Monthly upload limit exceeded',
+          limit: monthlyLimit,
+          used: monthlyUsed,
+          fileSize: file.size,
+          resetDate: userData.monthly_upload_reset_date
         });
       }
     } else {
@@ -360,7 +365,7 @@ router.post('/upload', uploadLimiter, authMiddleware, upload.single('file'), val
       await supabaseAdmin
         .from('users')
         .update({
-          daily_upload_used: dailyUsed + file.size
+          monthly_upload_used: monthlyUsed + file.size
         })
         .eq('id', user_id);
     } else {
