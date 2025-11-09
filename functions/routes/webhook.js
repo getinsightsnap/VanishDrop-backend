@@ -743,6 +743,22 @@ async function handlePaymentSuccess(payload, paymentData, res) {
         throw updateError;
       }
 
+      // If it's a lifetime deal, increment the counter
+      if (isLifetimeDeal) {
+        try {
+          const { data: counterData, error: counterError } = await supabaseAdmin
+            .rpc('increment_lifetime_deal_counter');
+          
+          if (counterError) {
+            logger.error('❌ Failed to increment lifetime deal counter', { error: counterError });
+          } else {
+            logger.info('✅ Lifetime deal counter incremented', { new_count: counterData });
+          }
+        } catch (counterError) {
+          logger.error('❌ Exception incrementing lifetime deal counter', { error: counterError.message });
+        }
+      }
+
       const message = isLifetimeDeal 
         ? `User ${userId} upgraded to Pro (LIFETIME DEAL - $149)` 
         : `User ${userId} upgraded to Pro (one-time payment)`;
@@ -794,6 +810,22 @@ async function handlePaymentSuccess(payload, paymentData, res) {
         if (updateError) {
           logger.error('❌ Failed to upgrade user to Pro', { error: updateError, userId: foundUserId });
           throw updateError;
+        }
+
+        // If it's a lifetime deal, increment the counter
+        if (isLifetimeDeal) {
+          try {
+            const { data: counterData, error: counterError } = await supabaseAdmin
+              .rpc('increment_lifetime_deal_counter');
+            
+            if (counterError) {
+              logger.error('❌ Failed to increment lifetime deal counter', { error: counterError });
+            } else {
+              logger.info('✅ Lifetime deal counter incremented', { new_count: counterData });
+            }
+          } catch (counterError) {
+            logger.error('❌ Exception incrementing lifetime deal counter', { error: counterError.message });
+          }
         }
 
         const message = isLifetimeDeal 
